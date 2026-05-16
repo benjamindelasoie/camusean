@@ -5,11 +5,15 @@ import Observation
 @Observable
 @MainActor
 final class SpeechService {
+    // Live transcription shown while user is speaking
+    var partialTranscription: String = ""
+
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private let engine = AVAudioEngine()
-    private var transcriptionContinuation: CheckedContinuation<String?, Never>?
+    private var continuation: CheckedContinuation<String?, Never>?
+    private var silenceTimer: Task<Void, Never>?
 
     func setLocale(_ identifier: String) {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: identifier))
@@ -29,19 +33,20 @@ final class SpeechService {
         return speechAuth && micAuth
     }
 
-    func startListening() async {
-        reset()
-        do {
-            try await AudioSessionManager.shared.activateForRecording()
-        } catch {
-            return
-        }
+    // Listens until one complete utterance is detected (Apple fires isFinal after ~1s silence).
+    // Returns the transcribed word/phrase, or nil on timeout, no speech, or cancellation.
+    // Each call is self-contained: starts the engine, waits, stops the engine.
+    func listenForOneWord() async -> String? {
+        teardown()
 
-        guard let recognizer, recognizer.isAvailable else { return }
+        do { try await AudioSessionManager.shared.activateForRecording() }
+        catch { return nil }
 
-        request = SFSpeechAudioBufferRecognitionRequest()
-        guard let request else { return }
-        request.shouldReportPartialResults = false
+        guard let recognizer, recognizer.isAvailable else { return nil }
+
+        let req = SFSpeechAudioBufferRecognitionRequest()
+        req.shouldReportPartialResults = true
+        self.request = req
 
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
@@ -51,48 +56,65 @@ final class SpeechService {
         engine.prepare()
         try? engine.start()
 
-        task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            Task { @MainActor [weak self] in
-                guard let self else { return }
-                if let result, result.isFinal {
-                    let text = result.bestTranscription.formattedString
-                    self.transcriptionContinuation?.resume(returning: text.isEmpty ? nil : text)
-                    self.transcriptionContinuation = nil
-                    return
-                }
-                if let error {
-                    let code = (error as NSError).code
-                    // 1110 = no speech detected, 1102 = cancelled — not errors worth propagating
-                    if code == 1110 || code == 1102 {
-                        self.transcriptionContinuation?.resume(returning: nil)
-                    } else {
-                        self.transcriptionContinuation?.resume(returning: nil)
+        let result = await withCheckedContinuation { cont in
+            self.continuation = cont
+            self.task = recognizer.recognitionTask(with: req) { [weak self] result, error in
+                Task { @MainActor [weak self] in
+                    guard let self else { return }
+                    if let result {
+                        self.partialTranscription = result.bestTranscription.formattedString
+                        self.restartSilenceTimer()
+                        if result.isFinal {
+                            self.silenceTimer?.cancel()
+                            let text = result.bestTranscription.formattedString
+                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                            self.partialTranscription = ""
+                            self.continuation?.resume(returning: text.isEmpty ? nil : text)
+                            self.continuation = nil
+                        }
                     }
-                    self.transcriptionContinuation = nil
+                    if error != nil {
+                        self.silenceTimer?.cancel()
+                        self.partialTranscription = ""
+                        self.continuation?.resume(returning: nil)
+                        self.continuation = nil
+                    }
                 }
             }
         }
-    }
 
-    // Stops audio capture and waits for the final transcription result.
-    // Returns nil if nothing was recognized or on error.
-    func finishAndTranscribe() async -> String? {
-        return await withCheckedContinuation { continuation in
-            transcriptionContinuation = continuation
-            request?.endAudio()
-            engine.inputNode.removeTap(onBus: 0)
-            engine.stop()
-        }
+        teardown()
+        return result
     }
 
     func reset() {
+        continuation?.resume(returning: nil)
+        continuation = nil
+        teardown()
+        partialTranscription = ""
+    }
+
+    private func restartSilenceTimer() {
+        silenceTimer?.cancel()
+        silenceTimer = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.0))
+            guard !Task.isCancelled else { return }
+            await self?.endAudioInput()
+        }
+    }
+
+    private func endAudioInput() {
+        request?.endAudio()
+    }
+
+    private func teardown() {
+        silenceTimer?.cancel()
+        silenceTimer = nil
         engine.inputNode.removeTap(onBus: 0)
         if engine.isRunning { engine.stop() }
-        request?.endAudio()
         task?.cancel()
-        transcriptionContinuation?.resume(returning: nil)
-        transcriptionContinuation = nil
-        request = nil
         task = nil
+        request?.endAudio()
+        request = nil
     }
 }

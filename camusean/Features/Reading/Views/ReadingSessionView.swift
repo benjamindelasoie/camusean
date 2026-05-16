@@ -4,7 +4,6 @@ import SwiftData
 struct ReadingSessionView: View {
     @State private var vm = SessionViewModel()
     @Environment(\.modelContext) private var modelContext
-    @State private var isHolding = false
 
     var body: some View {
         NavigationStack {
@@ -59,7 +58,7 @@ struct ReadingSessionView: View {
         VStack(spacing: 24) {
             statusArea
             Spacer()
-            micButton
+            listeningIndicator
             Spacer()
             Button("End Session", role: .destructive) {
                 vm.endSession()
@@ -72,12 +71,18 @@ struct ReadingSessionView: View {
         Group {
             switch vm.phase {
             case .idle:
-                Text("Hold the button and say a word")
+                Text("Starting…")
                     .foregroundStyle(.secondary)
             case .listening:
-                HStack(spacing: 8) {
-                    Circle().fill(.red).frame(width: 8, height: 8)
-                    Text("Listening…")
+                if vm.partialTranscription.isEmpty {
+                    Text("Say a word…")
+                        .foregroundStyle(.secondary)
+                } else {
+                    Text(vm.partialTranscription)
+                        .font(.title2)
+                        .fontWeight(.medium)
+                        .foregroundStyle(.primary)
+                        .transition(.opacity)
                 }
             case .processing(let word):
                 VStack(spacing: 8) {
@@ -98,35 +103,16 @@ struct ReadingSessionView: View {
                     .font(.callout)
             }
         }
+        .animation(.easeInOut(duration: 0.2), value: vm.partialTranscription)
         .padding()
         .frame(minHeight: 120, alignment: .center)
     }
 
-    private var micButton: some View {
-        Circle()
-            .fill(isHolding ? Color.red : Color.accentColor)
-            .frame(width: 100, height: 100)
-            .scaleEffect(isHolding ? 1.1 : 1.0)
-            .animation(.easeInOut(duration: 0.15), value: isHolding)
-            .overlay {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.white)
-            }
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { _ in
-                        if !isHolding {
-                            isHolding = true
-                            Task { await vm.onMicPressed() }
-                        }
-                    }
-                    .onEnded { _ in
-                        isHolding = false
-                        Task { await vm.onMicReleased() }
-                    }
-            )
-            .accessibilityLabel("Hold to listen")
+    private var listeningIndicator: some View {
+        PulsingListeningView(isListening: {
+            if case .listening = vm.phase { return true }
+            return false
+        }())
     }
 
     private var summarySheet: some View {
@@ -145,6 +131,41 @@ struct ReadingSessionView: View {
         }
         .padding()
         .presentationDetents([.medium])
+    }
+}
+
+private struct PulsingListeningView: View {
+    let isListening: Bool
+    @State private var pulse = false
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<3, id: \.self) { i in
+                Circle()
+                    .stroke(Color.accentColor.opacity(0.3 - Double(i) * 0.08), lineWidth: 1.5)
+                    .frame(width: 100 + CGFloat(i) * 32, height: 100 + CGFloat(i) * 32)
+                    .scaleEffect(pulse && isListening ? 1.15 : 1.0)
+                    .opacity(pulse && isListening ? 0.6 : 0.2)
+                    .animation(
+                        isListening
+                            ? .easeInOut(duration: 1.2).repeatForever(autoreverses: true).delay(Double(i) * 0.2)
+                            : .default,
+                        value: pulse
+                    )
+            }
+            Circle()
+                .fill(isListening ? Color.accentColor : Color.secondary.opacity(0.3))
+                .frame(width: 100, height: 100)
+                .animation(.easeInOut(duration: 0.3), value: isListening)
+                .overlay {
+                    Image(systemName: "mic.fill")
+                        .font(.system(size: 40))
+                        .foregroundStyle(.white)
+                }
+        }
+        .onAppear { pulse = true }
+        .onChange(of: isListening) { _, _ in pulse = true }
+        .accessibilityLabel(isListening ? "Listening for speech" : "Not listening")
     }
 }
 

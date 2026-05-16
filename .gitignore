@@ -1,8 +1,9 @@
 # Xcode
 *.xcuserstate
 xcuserdata/
-*.xcworkspace/xcuserdata/
-*.xcworkspace/xcshareddata/IDEWorkspaceChecks.plist
+**/xcuserdata/
+xcshareddata/
+**/xcshareddata/
 DerivedData/
 *.moved-aside
 *.pbxuser

@@ -15,10 +15,18 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         await withCheckedContinuation { continuation in
             self.continuation = continuation
             let utterance = AVSpeechUtterance(string: text)
-            utterance.voice = AVSpeechSynthesisVoice(language: language)
+            utterance.voice = bestVoice(for: language)
             utterance.rate = AVSpeechUtteranceDefaultSpeechRate
             synthesizer.speak(utterance)
         }
+    }
+
+    private func bestVoice(for language: String) -> AVSpeechSynthesisVoice? {
+        let candidates = AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.hasPrefix(language.prefix(2)) }
+        return candidates.first { $0.quality == .premium }
+            ?? candidates.first { $0.quality == .enhanced }
+            ?? AVSpeechSynthesisVoice(language: language)
     }
 
     func stopSpeaking() {

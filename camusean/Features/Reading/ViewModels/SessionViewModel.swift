@@ -1,6 +1,7 @@
 import Foundation
 import SwiftData
 import Observation
+import UIKit
 
 enum SessionPhase {
     case idle
@@ -18,10 +19,13 @@ final class SessionViewModel {
     var lookupCount = 0
     var showSummary = false
 
+    var partialTranscription: String { speechService.partialTranscription }
+
     private let sessionCap = 50
     private let speechService = SpeechService()
     private let anthropicService = AnthropicService()
     private let tts = TTSService.shared
+    private var listeningTask: Task<Void, Never>?
     var modelContext: ModelContext?
 
     var sourceLocale: String { UserDefaults.standard.string(forKey: "sourceLanguageLocale") ?? "fr-FR" }
@@ -37,43 +41,38 @@ final class SessionViewModel {
         speechService.setLocale(sourceLocale)
         isSessionActive = true
         lookupCount = 0
-        phase = .idle
+        UIApplication.shared.isIdleTimerDisabled = true
+
+        listeningTask = Task {
+            while !Task.isCancelled {
+                phase = .listening
+                if let word = await speechService.listenForOneWord() {
+                    guard !Task.isCancelled else { break }
+                    await lookup(word: word)
+                }
+            }
+        }
     }
 
     func endSession() {
+        listeningTask?.cancel()
+        listeningTask = nil
         speechService.reset()
         AudioSessionManager.shared.deactivate()
         tts.stopSpeaking()
+        UIApplication.shared.isIdleTimerDisabled = false
         isSessionActive = false
         showSummary = true
         phase = .idle
     }
 
-    func onMicPressed() async {
+    private func lookup(word: String) async {
         guard lookupCount < sessionCap else {
             phase = .error("Session limit of \(sessionCap) lookups reached. Words saved.")
             endSession()
             return
         }
-        tts.stopSpeaking()
-        phase = .listening
-        await speechService.startListening()
-    }
 
-    func onMicReleased() async {
-        guard case .listening = phase else { return }
-        phase = .idle
-
-        guard let word = await speechService.finishAndTranscribe(),
-              !word.trimmingCharacters(in: .whitespaces).isEmpty else {
-            phase = .idle
-            return
-        }
-
-        await lookup(word: word)
-    }
-
-    private func lookup(word: String) async {
         phase = .processing(word)
 
         guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
@@ -103,8 +102,6 @@ final class SessionViewModel {
             await tts.speak("Couldn't get definition")
             try? await AudioSessionManager.shared.activateForRecording()
         }
-
-        if case .error = phase {} else { phase = .idle }
     }
 
     private func saveWord(word: String, definition: String, example: String) {
