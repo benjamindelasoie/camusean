@@ -20,3 +20,5 @@ DerivedData/
 
 # Instruments
 *.trace
+.gstack/
+.xcodebuildmcp/

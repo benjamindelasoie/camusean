@@ -26,7 +26,7 @@ final class SpeechService {
             }
         }
         let micAuth = await withCheckedContinuation { continuation in
-            AVAudioSession.sharedInstance().requestRecordPermission { granted in
+            AVAudioApplication.requestRecordPermission { granted in
                 continuation.resume(returning: granted)
             }
         }
@@ -39,7 +39,7 @@ final class SpeechService {
     func listenForOneWord() async -> String? {
         teardown()
 
-        do { try await AudioSessionManager.shared.activateForRecording() }
+        do { try AudioSessionManager.shared.activateForRecording() }
         catch { return nil }
 
         guard let recognizer, recognizer.isAvailable else { return nil }
@@ -51,6 +51,7 @@ final class SpeechService {
         let inputNode = engine.inputNode
         let format = inputNode.outputFormat(forBus: 0)
         inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, _ in
+            guard buffer.frameLength > 0 else { return }
             self?.request?.append(buffer)
         }
         engine.prepare()
@@ -99,7 +100,7 @@ final class SpeechService {
         silenceTimer = Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.0))
             guard !Task.isCancelled else { return }
-            await self?.endAudioInput()
+            self?.endAudioInput()
         }
     }
 
@@ -110,8 +111,8 @@ final class SpeechService {
     private func teardown() {
         silenceTimer?.cancel()
         silenceTimer = nil
-        engine.inputNode.removeTap(onBus: 0)
         if engine.isRunning { engine.stop() }
+        engine.inputNode.removeTap(onBus: 0)
         task?.cancel()
         task = nil
         request?.endAudio()

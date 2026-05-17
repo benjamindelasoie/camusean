@@ -91,16 +91,17 @@ final class SessionViewModel {
             saveWord(word: word, definition: result.definition, example: result.exampleSentence)
             lookupCount += 1
             phase = .result(word, result.definition)
-            try? await AudioSessionManager.shared.activateForPlayback()
-            await tts.speak("\(word). \(result.definition)")
-            try? await AudioSessionManager.shared.activateForRecording()
+            try? AudioSessionManager.shared.activateForPlayback()
+            await tts.speak(word, language: sourceLocale)
+            await tts.speak(result.definition, language: "en-US")
+            try? AudioSessionManager.shared.activateForRecording()
         } catch {
             let msg = error.localizedDescription
             saveWord(word: word, definition: "", example: "")
             phase = .error(msg)
-            try? await AudioSessionManager.shared.activateForPlayback()
+            try? AudioSessionManager.shared.activateForPlayback()
             await tts.speak("Couldn't get definition")
-            try? await AudioSessionManager.shared.activateForRecording()
+            try? AudioSessionManager.shared.activateForRecording()
         }
     }
 

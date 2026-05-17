@@ -5,11 +5,6 @@ struct LookupResult {
     let exampleSentence: String
 }
 
-private struct DefinitionResponse: Decodable {
-    let definition: String
-    let exampleSentence: String
-}
-
 actor AnthropicService {
     private let model = "claude-haiku-4-5-20251001"
     private let endpoint = URL(string: "https://api.anthropic.com/v1/messages")!
@@ -68,11 +63,13 @@ actor AnthropicService {
         let extracted = extractJSON(from: text)
         guard
             let jsonData = extracted.data(using: .utf8),
-            let parsed = try? JSONDecoder().decode(DefinitionResponse.self, from: jsonData)
+            let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: String],
+            let definition = obj["definition"],
+            let exampleSentence = obj["exampleSentence"]
         else { throw LookupError.malformedResponse("couldn't parse JSON: \(extracted)") }
 
         dailyCount += 1
-        return LookupResult(definition: parsed.definition, exampleSentence: parsed.exampleSentence)
+        return LookupResult(definition: definition, exampleSentence: exampleSentence)
     }
 
     private func extractJSON(from text: String) -> String {

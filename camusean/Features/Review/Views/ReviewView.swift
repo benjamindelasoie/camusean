@@ -167,6 +167,18 @@ struct ReviewView: View {
             .fill(Color(.systemBackground))
             .shadow(color: .black.opacity(0.11), radius: 22, y: 8)
             .frame(height: cardHeight)
+            .overlay(alignment: .topTrailing) {
+                Button(action: dismiss) {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(.tertiary)
+                        .frame(width: 32, height: 32)
+                        .contentShape(Rectangle())
+                }
+                .padding(.top, 6)
+                .padding(.trailing, 10)
+                .accessibilityLabel("Delete word")
+            }
             .padding(.horizontal, 24)
             .overlay {
                 VStack(spacing: 0) {
@@ -319,17 +331,24 @@ struct ReviewView: View {
 
     private func markKnown() {
         words[currentIndex].isKnown = true
-        advance()
+        // @Query drops this row; the next card slides into currentIndex.
+        resetCardState()
     }
 
     private func keepWord() {
-        advance()
+        currentIndex += 1
+        resetCardState()
     }
 
-    private func advance() {
+    private func dismiss() {
+        modelContext.delete(words[currentIndex])
+        // @Query drops this row; the next card slides into currentIndex.
+        resetCardState()
+    }
+
+    private func resetCardState() {
         dragOffset = 0
         isRevealed = false
-        currentIndex += 1
     }
 }
 
