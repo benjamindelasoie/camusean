@@ -17,7 +17,7 @@ Voice reading companion — say a foreign word aloud during a reading session, h
 - Test: `mcp__xcodebuildmcp__test_sim_name_proj`
 - Clean: `mcp__xcodebuildmcp__clean`
 
-The `.xcodeproj` is at `camusean/camusean.xcodeproj` (one level down from this file).
+The `.xcodeproj` is at `camusean.xcodeproj` (same directory as this file). Swift sources live one level down in `camusean/` (the `PBXFileSystemSynchronizedRootGroup`).
 
 ## Project Structure
 ```
