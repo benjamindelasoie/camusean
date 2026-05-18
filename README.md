@@ -54,3 +54,7 @@ camusean/
 ## Privacy
 
 Everything runs on-device or directly between the app and the Anthropic API using your own key. No user data is collected or stored remotely.
+
+## License
+
+[AGPL-3.0](LICENSE) — Copyright (c) 2026 Benjamin Delasoie.
