@@ -4,26 +4,130 @@ import SwiftData
 struct ReadingSessionView: View {
     @State private var vm = SessionViewModel()
     @Environment(\.modelContext) private var modelContext
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    // All words; used only to compute the weekly "learned" count for the progress strip.
+    @Query private var allWords: [Word]
+
+    @State private var showVoiceOnboarding = false
+
+    private static let voicePromptShownKey = "voicePromptShown"
 
     var body: some View {
         ZStack {
             if !vm.isSessionActive {
                 startScreen
-                    .transition(.asymmetric(
-                        insertion: .opacity,
-                        removal: .scale(scale: 0.96).combined(with: .opacity)
-                    ))
+                    .transition(reduceMotion
+                        ? .opacity
+                        : .asymmetric(
+                            insertion: .opacity,
+                            removal: .scale(scale: 0.96).combined(with: .opacity)
+                        ))
             } else {
                 sessionScreen
-                    .transition(.asymmetric(
-                        insertion: .scale(scale: 1.03).combined(with: .opacity),
-                        removal: .opacity
-                    ))
+                    .transition(reduceMotion
+                        ? .opacity
+                        : .asymmetric(
+                            insertion: .scale(scale: 1.03).combined(with: .opacity),
+                            removal: .opacity
+                        ))
             }
         }
         .animation(.easeInOut(duration: 0.4), value: vm.isSessionActive)
         .sheet(isPresented: $vm.showSummary) { summarySheet }
-        .onAppear { vm.modelContext = modelContext }
+        .sheet(isPresented: $showVoiceOnboarding) { voiceOnboardingSheet }
+        .onAppear {
+            vm.modelContext = modelContext
+            evaluateVoiceOnboarding()
+        }
+    }
+
+    // MARK: - Voice onboarding
+
+    // TODO: migrate this onboarding to TipKit when adding a second one-time tip. See TODOS.md.
+    private func evaluateVoiceOnboarding() {
+        let defaults = UserDefaults.standard
+        guard !defaults.bool(forKey: Self.voicePromptShownKey) else { return }
+
+        let sourceLocale = defaults.string(forKey: "sourceLanguageLocale") ?? "fr-FR"
+        let sourcePrefix = String(sourceLocale.prefix(2))
+        let targetPrefix = "en"
+
+        let hasSourceEnhanced = TTSService.hasEnhancedVoice(forLanguagePrefix: sourcePrefix)
+        let hasTargetEnhanced = TTSService.hasEnhancedVoice(forLanguagePrefix: targetPrefix)
+
+        if !hasSourceEnhanced || !hasTargetEnhanced {
+            showVoiceOnboarding = true
+        } else {
+            // User has enhanced voices for both locales; never prompt again.
+            defaults.set(true, forKey: Self.voicePromptShownKey)
+        }
+    }
+
+    private var voiceOnboardingSheet: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            Text("Hear the best voices")
+                .font(.system(size: 26, weight: .bold, design: .serif))
+                .padding(.top, 12)
+
+            Text("Camusean reads definitions out loud. Apple's default voice sounds robotic. The enhanced voices are dramatically better, but you have to download them in iOS Settings.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .lineSpacing(4)
+
+            VStack(alignment: .leading, spacing: 10) {
+                instructionRow(number: "1", text: "Open Settings.")
+                instructionRow(number: "2", text: "Accessibility → Spoken Content → Voices.")
+                instructionRow(number: "3", text: "Pick English (and your reading language).")
+                instructionRow(number: "4", text: "Tap the cloud icon next to a voice marked Enhanced or Premium.")
+            }
+            .padding(.top, 4)
+
+            Spacer()
+
+            Button {
+                UserDefaults.standard.set(true, forKey: Self.voicePromptShownKey)
+                showVoiceOnboarding = false
+            } label: {
+                Text("Got it")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 17)
+                    .background(Color.camusean)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 15))
+            }
+        }
+        .padding(.horizontal, 28)
+        .padding(.top, 24)
+        .padding(.bottom, 36)
+        .presentationDetents([.medium, .large])
+        .presentationCornerRadius(30)
+        .presentationDragIndicator(.visible)
+    }
+
+    private func instructionRow(number: String, text: String) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Text(number)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(Color.camusean)
+                .frame(width: 18, alignment: .leading)
+            Text(text)
+                .font(.callout)
+                .foregroundStyle(.primary.opacity(0.85))
+                .lineSpacing(3)
+        }
+    }
+
+    // Words "graduated" this week (interval >= 6 days, scheduled, created this week).
+    private var learnedThisWeekCount: Int {
+        let now = Date()
+        let startOfWeek = Calendar.current.dateInterval(of: .weekOfYear, for: now)?.start ?? now
+        return allWords.filter { word in
+            word.nextReviewDate != nil
+                && word.interval >= 6
+                && word.timestamp >= startOfWeek
+        }.count
     }
 
     // MARK: - Start Screen
@@ -127,22 +231,36 @@ struct ReadingSessionView: View {
     }
 
     private var sessionHeader: some View {
-        HStack {
-            Text("CAMUSEAN")
-                .font(.system(size: 10, weight: .bold, design: .monospaced))
-                .foregroundStyle(Color(.tertiaryLabel))
-                .kerning(2.5)
-            Spacer()
-            if vm.lookupCount > 0 {
-                Text("\(vm.lookupCount) word\(vm.lookupCount == 1 ? "" : "s")")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundStyle(Color.camusean)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 5)
-                    .background(Color.camusean.opacity(0.12))
-                    .clipShape(Capsule())
-                    .transition(.scale(scale: 0.8).combined(with: .opacity))
-                    .animation(.spring(duration: 0.35, bounce: 0.2), value: vm.lookupCount)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("CAMUSEAN")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundStyle(Color(.tertiaryLabel))
+                    .kerning(2.5)
+                Spacer()
+                if vm.lookupCount > 0 {
+                    Text("\(vm.lookupCount) word\(vm.lookupCount == 1 ? "" : "s")")
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(Color.camusean)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 5)
+                        .background(Color.camusean.opacity(0.12))
+                        .clipShape(Capsule())
+                        .transition(reduceMotion ? .opacity : .scale(scale: 0.8).combined(with: .opacity))
+                        .animation(.spring(duration: 0.35, bounce: 0.2), value: vm.lookupCount)
+                }
+            }
+            if learnedThisWeekCount > 0 {
+                HStack(spacing: 4) {
+                    Text("\(learnedThisWeekCount)")
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.camusean)
+                    Text(learnedThisWeekCount == 1
+                         ? "word learned this week"
+                         : "words learned this week")
+                        .font(.caption)
+                        .foregroundStyle(Color(.tertiaryLabel))
+                }
             }
         }
     }
@@ -260,6 +378,8 @@ private struct OrganicMicView: View {
     let isListening: Bool
     let isProcessing: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var breathe = false
     @State private var spinAngle: Double = 0
 
@@ -273,14 +393,15 @@ private struct OrganicMicView: View {
                         width: 88 + CGFloat(i) * 28,
                         height: 88 + CGFloat(i) * 28
                     )
-                    .scaleEffect(breathe && isListening ? 1.13 : 1.0)
-                    .opacity(isListening ? (breathe ? 1.0 : 0.25) : 0.0)
+                    .scaleEffect(!reduceMotion && breathe && isListening ? 1.13 : 1.0)
+                    .opacity(isListening ? (reduceMotion ? 0.6 : (breathe ? 1.0 : 0.25)) : 0.0)
                     .animation(
-                        isListening
+                        reduceMotion ? nil :
+                        (isListening
                             ? .easeInOut(duration: 1.6)
                                 .repeatForever(autoreverses: true)
                                 .delay(Double(i) * 0.24)
-                            : .easeOut(duration: 0.4),
+                            : .easeOut(duration: 0.4)),
                         value: breathe
                     )
             }
@@ -294,7 +415,7 @@ private struct OrganicMicView: View {
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round)
                     )
                     .frame(width: 102, height: 102)
-                    .rotationEffect(.degrees(spinAngle))
+                    .rotationEffect(.degrees(reduceMotion ? 0 : spinAngle))
             }
 
             // Core — grey base + amber overlay for smooth animated transition
@@ -324,13 +445,14 @@ private struct OrganicMicView: View {
                 .animation(.easeInOut(duration: 0.3), value: isListening)
         }
         .onAppear {
+            guard !reduceMotion else { return }
             breathe = true
             withAnimation(.linear(duration: 1.1).repeatForever(autoreverses: false)) {
                 spinAngle = 360
             }
         }
         .onChange(of: isListening) { _, newVal in
-            if newVal { breathe = true }
+            if newVal && !reduceMotion { breathe = true }
         }
         .accessibilityLabel(isListening ? "Listening" : isProcessing ? "Processing" : "Standby")
     }
@@ -339,6 +461,7 @@ private struct OrganicMicView: View {
 // MARK: - Dots Loading View
 
 private struct DotsView: View {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var animate = false
 
     var body: some View {
@@ -347,9 +470,10 @@ private struct DotsView: View {
                 Circle()
                     .fill(Color(.tertiaryLabel))
                     .frame(width: 5, height: 5)
-                    .scaleEffect(animate ? 1.5 : 0.6)
-                    .opacity(animate ? 1.0 : 0.3)
+                    .scaleEffect(!reduceMotion && animate ? 1.5 : (reduceMotion ? 1.0 : 0.6))
+                    .opacity(!reduceMotion && animate ? 1.0 : (reduceMotion ? 0.6 : 0.3))
                     .animation(
+                        reduceMotion ? nil :
                         .easeInOut(duration: 0.5)
                             .repeatForever(autoreverses: true)
                             .delay(Double(i) * 0.17),
@@ -357,7 +481,7 @@ private struct DotsView: View {
                     )
             }
         }
-        .onAppear { animate = true }
+        .onAppear { if !reduceMotion { animate = true } }
     }
 }
 

@@ -2,20 +2,30 @@ import SwiftUI
 import SwiftData
 
 struct ReviewView: View {
-    @Query(filter: #Predicate<Word> { !$0.isKnown }, sort: \Word.timestamp)
-    private var words: [Word]
+    // Unfiltered + sorted; we filter to "due now" in a computed property so the
+    // cutoff (Date()) refreshes on each render rather than being captured once.
+    @Query(sort: \Word.timestamp) private var allWords: [Word]
 
     @Environment(\.modelContext) private var modelContext
     @State private var currentIndex = 0
     @State private var isRevealed = false
     @State private var dragOffset: CGFloat = 0
 
+    // The deck shown to the user: words with no schedule yet (new) or due now.
+    private var words: [Word] {
+        let now = Date()
+        return allWords.filter { word in
+            guard let nrd = word.nextReviewDate else { return true }
+            return nrd <= now
+        }
+    }
+
     var body: some View {
         NavigationStack {
             Group {
-                if words.isEmpty {
+                if allWords.isEmpty {
                     emptyState
-                } else if currentIndex >= words.count {
+                } else if words.isEmpty || currentIndex >= words.count {
                     allCaughtUp
                 } else {
                     cardStack
@@ -23,6 +33,18 @@ struct ReviewView: View {
             }
             .navigationTitle("Review")
             .navigationBarTitleDisplayMode(.large)
+            .toolbar {
+                if !allWords.isEmpty {
+                    ToolbarItem(placement: .topBarTrailing) {
+                        NavigationLink {
+                            LibraryView()
+                        } label: {
+                            Image(systemName: "books.vertical")
+                                .accessibilityLabel("Library")
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -62,19 +84,20 @@ struct ReviewView: View {
                     .foregroundStyle(Color.camusean)
             }
             VStack(spacing: 8) {
-                Text("All done")
+                Text("All caught up")
                     .font(.system(size: 22, weight: .semibold, design: .serif))
-                Text("You've reviewed everything.")
+                Text("Come back tomorrow.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             }
-            Button("Start over") {
-                currentIndex = 0
-                isRevealed = false
+            NavigationLink {
+                LibraryView()
+            } label: {
+                Text("Browse all your words →")
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(Color.camusean)
             }
-            .font(.subheadline.weight(.medium))
-            .foregroundStyle(Color.camusean)
-            .padding(.top, 4)
+            .padding(.top, 8)
         }
         .padding(40)
     }
@@ -116,10 +139,10 @@ struct ReviewView: View {
                         DragGesture()
                             .onChanged { dragOffset = $0.translation.width }
                             .onEnded { value in
-                                if value.translation.width < -100 {
-                                    swipeOut(direction: -1, action: markKnown)
-                                } else if value.translation.width > 100 {
-                                    swipeOut(direction: 1, action: keepWord)
+                                if value.translation.width > 100 {
+                                    swipeOut(direction: 1, action: markLearned)
+                                } else if value.translation.width < -100 {
+                                    swipeOut(direction: -1, action: markRepeat)
                                 } else {
                                     withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
                                         dragOffset = 0
@@ -127,6 +150,8 @@ struct ReviewView: View {
                                 }
                             }
                     )
+                    .accessibilityAction(named: "Mark learned") { markLearned() }
+                    .accessibilityAction(named: "Mark repeat") { markRepeat() }
             }
 
             Spacer()
@@ -207,18 +232,17 @@ struct ReviewView: View {
 
                         // Swipe direction hints — visible only while dragging
                         HStack {
-                            Label("Known", systemImage: "checkmark")
+                            Label("Repeat", systemImage: "arrow.clockwise")
                                 .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.40))
+                                .foregroundStyle(Color(.systemOrange))
                                 .opacity(dragOffset < -20 ? 1 : 0)
                                 .animation(.easeOut(duration: 0.12), value: dragOffset)
 
                             Spacer()
 
-                            Label("Again", systemImage: "arrow.clockwise")
+                            Label("Learned", systemImage: "checkmark")
                                 .font(.system(size: 11, weight: .semibold))
-                                .labelStyle(.titleAndIcon) // icon right
-                                .foregroundStyle(Color(.systemOrange))
+                                .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.40))
                                 .opacity(dragOffset > 20 ? 1 : 0)
                                 .animation(.easeOut(duration: 0.12), value: dragOffset)
                         }
@@ -286,16 +310,16 @@ struct ReviewView: View {
             } else {
                 HStack(spacing: 14) {
                     reviewButton(
-                        label: "Known",
-                        icon: "checkmark",
-                        fg: Color(red: 0.18, green: 0.62, blue: 0.40),
-                        action: markKnown
+                        label: "Repeat",
+                        icon: "arrow.clockwise",
+                        fg: Color(.systemOrange),
+                        action: markRepeat
                     )
                     reviewButton(
-                        label: "Study again",
-                        icon: "arrow.clockwise",
-                        fg: Color(.systemGray),
-                        action: keepWord
+                        label: "Learned",
+                        icon: "checkmark",
+                        fg: Color(red: 0.18, green: 0.62, blue: 0.40),
+                        action: markLearned
                     )
                 }
             }
@@ -320,29 +344,33 @@ struct ReviewView: View {
 
     // MARK: - Swipe Logic
 
-    private func swipeOut(direction: CGFloat, action: @escaping () -> Void) {
+    private func swipeOut(direction: CGFloat, action: @escaping @MainActor () -> Void) {
         withAnimation(.easeIn(duration: 0.2)) {
             dragOffset = direction * 500
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(200))
             action()
         }
     }
 
-    private func markKnown() {
-        words[currentIndex].isKnown = true
-        // @Query drops this row; the next card slides into currentIndex.
+    private func markLearned() {
+        SRSScheduler.schedule(word: words[currentIndex], quality: 4)
+        try? modelContext.save()
+        // Filter recomputes; the scheduled-future row drops, next due card slides into currentIndex.
         resetCardState()
     }
 
-    private func keepWord() {
-        currentIndex += 1
+    private func markRepeat() {
+        SRSScheduler.schedule(word: words[currentIndex], quality: 2)
+        try? modelContext.save()
+        // SM-2 lapse pushes nextReviewDate to tomorrow; row drops from today's deck.
         resetCardState()
     }
 
     private func dismiss() {
         modelContext.delete(words[currentIndex])
-        // @Query drops this row; the next card slides into currentIndex.
+        // Row removed entirely; the next due card slides into currentIndex.
         resetCardState()
     }
 
