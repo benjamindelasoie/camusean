@@ -42,6 +42,17 @@ struct ReadingSessionView: View {
         }
     }
 
+    // Tap on the mic during .processing or .result cancels the current lookup.
+    // Other phases are no-ops (no in-flight work to cancel).
+    private func handleMicTap() {
+        switch vm.phase {
+        case .processing, .result:
+            vm.cancelCurrentLookup()
+        case .idle, .listening, .error:
+            break
+        }
+    }
+
     // MARK: - Voice onboarding
 
     // TODO: migrate this onboarding to TipKit when adding a second one-time tip. See TODOS.md.
@@ -218,7 +229,8 @@ struct ReadingSessionView: View {
 
             OrganicMicView(
                 isListening: isListening,
-                isProcessing: isProcessing
+                isProcessing: isProcessing,
+                onTap: handleMicTap
             )
 
             Spacer()
@@ -377,6 +389,7 @@ struct ReadingSessionView: View {
 private struct OrganicMicView: View {
     let isListening: Bool
     let isProcessing: Bool
+    let onTap: () -> Void
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -444,6 +457,8 @@ private struct OrganicMicView: View {
                 .opacity(isListening || isProcessing ? 1.0 : 0.45)
                 .animation(.easeInOut(duration: 0.3), value: isListening)
         }
+        .contentShape(Circle())
+        .onTapGesture { onTap() }
         .onAppear {
             guard !reduceMotion else { return }
             breathe = true

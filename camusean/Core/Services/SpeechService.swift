@@ -12,8 +12,28 @@ final class SpeechService {
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
     private let engine = AVAudioEngine()
-    private var continuation: CheckedContinuation<String?, Never>?
+    private var continuation: CheckedContinuation<[String], Never>?
     private var silenceTimer: Task<Void, Never>?
+
+    // Pure string-level helper, extracted from listenForCandidates so it can be unit-tested
+    // without driving the SFSpeechRecognizer.
+    //
+    // Behavior: trims whitespace, drops empty entries, dedupes case-insensitively (keeping
+    // first occurrence and its original casing), caps the returned array at `max` entries.
+    nonisolated static func extractDistinctTranscriptions(from strings: [String], max: Int = 3) -> [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for s in strings {
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            let key = trimmed.lowercased()
+            if seen.insert(key).inserted {
+                result.append(trimmed)
+                if result.count >= max { break }
+            }
+        }
+        return result
+    }
 
     func setLocale(_ identifier: String) {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: identifier))
@@ -34,15 +54,16 @@ final class SpeechService {
     }
 
     // Listens until one complete utterance is detected (Apple fires isFinal after ~1s silence).
-    // Returns the transcribed word/phrase, or nil on timeout, no speech, or cancellation.
-    // Each call is self-contained: starts the engine, waits, stops the engine.
-    func listenForOneWord() async -> String? {
+    // Returns up to 3 distinct candidate transcriptions from Apple's ASR, or an empty array
+    // on timeout / no speech / cancellation. Each call is self-contained: starts the engine,
+    // waits, stops the engine.
+    func listenForCandidates() async -> [String] {
         teardown()
 
         do { try AudioSessionManager.shared.activateForRecording() }
-        catch { return nil }
+        catch { return [] }
 
-        guard let recognizer, recognizer.isAvailable else { return nil }
+        guard let recognizer, recognizer.isAvailable else { return [] }
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
@@ -57,7 +78,7 @@ final class SpeechService {
         engine.prepare()
         try? engine.start()
 
-        let result = await withCheckedContinuation { cont in
+        let candidates = await withCheckedContinuation { cont in
             self.continuation = cont
             self.task = recognizer.recognitionTask(with: req) { [weak self] result, error in
                 Task { @MainActor [weak self] in
@@ -67,17 +88,17 @@ final class SpeechService {
                         self.restartSilenceTimer()
                         if result.isFinal {
                             self.silenceTimer?.cancel()
-                            let text = result.bestTranscription.formattedString
-                                .trimmingCharacters(in: .whitespacesAndNewlines)
+                            let raw = result.transcriptions.map { $0.formattedString }
+                            let distinct = Self.extractDistinctTranscriptions(from: raw)
                             self.partialTranscription = ""
-                            self.continuation?.resume(returning: text.isEmpty ? nil : text)
+                            self.continuation?.resume(returning: distinct)
                             self.continuation = nil
                         }
                     }
                     if error != nil {
                         self.silenceTimer?.cancel()
                         self.partialTranscription = ""
-                        self.continuation?.resume(returning: nil)
+                        self.continuation?.resume(returning: [])
                         self.continuation = nil
                     }
                 }
@@ -85,11 +106,17 @@ final class SpeechService {
         }
 
         teardown()
-        return result
+        return candidates
+    }
+
+    // Backwards-compatibility shim while SessionViewModel still calls the single-word API.
+    // Will be removed once T3 migrates the callsite to listenForCandidates.
+    func listenForOneWord() async -> String? {
+        await listenForCandidates().first
     }
 
     func reset() {
-        continuation?.resume(returning: nil)
+        continuation?.resume(returning: [])
         continuation = nil
         teardown()
         partialTranscription = ""
