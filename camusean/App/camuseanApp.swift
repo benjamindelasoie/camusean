@@ -10,26 +10,50 @@ import SwiftData
 
 @main
 struct camuseanApp: App {
-    var sharedModelContainer: ModelContainer = {
-        let schema = Schema(versionedSchema: CamuseanSchemaV2.self)
-        let modelConfiguration = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
+    @State private var containerState: ContainerState
 
-        do {
-            return try ModelContainer(
-                for: schema,
-                migrationPlan: CamuseanMigrationPlan.self,
-                configurations: [modelConfiguration]
-            )
-        } catch {
-            // TODO: replace fatalError with recovery UI before App Store. See TODOS.md.
-            fatalError("Could not create ModelContainer: \(error)")
-        }
-    }()
+    init() {
+        _containerState = State(initialValue: Self.loadInitial())
+    }
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            switch containerState {
+            case .loaded(let container):
+                ContentView()
+                    .modelContainer(container)
+            case .failed(let error):
+                ModelContainerErrorView(
+                    error: error,
+                    onReset: handleReset,
+                    onRetry: handleRetry
+                )
+            }
         }
-        .modelContainer(sharedModelContainer)
     }
+
+    private static func loadInitial() -> ContainerState {
+        switch ModelContainerLoader.load() {
+        case .success(let container): return .loaded(container)
+        case .failure(let error): return .failed(error)
+        }
+    }
+
+    private func handleRetry() {
+        containerState = Self.loadInitial()
+    }
+
+    private func handleReset() {
+        do {
+            try ModelContainerLoader.resetStore()
+            containerState = Self.loadInitial()
+        } catch {
+            containerState = .failed(error)
+        }
+    }
+}
+
+private enum ContainerState {
+    case loaded(ModelContainer)
+    case failed(Error)
 }

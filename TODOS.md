@@ -73,27 +73,6 @@ list scroll lag on older devices.
 
 ---
 
-## Graceful ModelContainer init failure recovery
-
-**What.** Replace the `fatalError` in `camuseanApp.swift` when `ModelContainer`
-fails to load with an in-app error screen that offers "reset database" as a recovery
-action.
-
-**Why.** Currently any migration failure or store corruption crashes the app on
-launch with no recovery path. The user has to delete and reinstall (which we just
-went through together for the v1.1 migration bug). A user-friendly error UI with
-a reset button is more humane.
-
-**Where.** `camusean/App/camuseanApp.swift` — the `sharedModelContainer` closure.
-Probably extract container creation into a `ModelContainerLoader` service that
-returns `Result<ModelContainer, ModelContainerError>`, then have the App body show
-an error screen instead of crashing.
-
-**When to revisit.** Before App Store submission. TestFlight users are OK with
-"delete + reinstall"; paying App Store users are not.
-
----
-
 ## Real integration test for SwiftData lightweight migration
 
 **What.** A test that exercises the actual V1 → V2 SwiftData lightweight migration
