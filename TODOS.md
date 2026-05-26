@@ -73,6 +73,47 @@ list scroll lag on older devices.
 
 ---
 
+## Multi-language reading: per-session switching + per-language Library
+
+**What.** Make camusean comfortable for readers who switch languages between
+sessions (some sessions in French, some in English). Two linked parts:
+1. **Low-friction per-session language switch.** Today the reading language is a
+   single global setting buried in Settings (`sourceLanguageLocale` /
+   `sourceLanguageName`). Switching every session means a Settings detour. Surface
+   a quick switch on the Reading start screen (e.g. a language chip on `startScreen`
+   that the session reads from), so changing languages is one tap, not a settings trip.
+2. **Per-language Library.** The Library and review deck currently mix all languages
+   together. Segment/filter saved words by `Word.sourceLanguage` so a French session's
+   words and an English session's words don't blur — and so review (and TTS voice) is
+   scoped to one language at a time.
+
+**Why.** The named real user (the friend) reads in both French and English. Mixed
+into one undifferentiated list, the Library is confusing to review, and a French
+flashcard surfacing in an English study session is wrong (different pronunciation,
+different voice). The data already supports this — `Word.sourceLanguage` is stored
+per row (set in `SessionViewModel.saveWord`), so this is filtering/grouping work, not
+a schema change. The `ReadingLanguage` catalog (`Core/Models/ReadingLanguage.swift`)
+is the natural source for the language list.
+
+**Where.**
+- Reading-language switch: `SettingsView` (global picker today) + `SessionViewModel`
+  (`sourceLocale`/`sourceName` from UserDefaults) + `ReadingSessionView.startScreen`
+  for the proposed quick-switch chip.
+- Library: `camusean/Features/Review/Views/LibraryView.swift` — add a per-language
+  filter/segment on `sourceLanguage`. Touches the same `filteredWords` as the
+  [Dynamic @Query in LibraryView] TODO above — do them together.
+- Review deck: `ReviewView.swift` — decide whether the SRS queue is per-language or
+  offers a language scope.
+- Respect the no-4th-tab preference: Library stays a push-from-Review destination,
+  not a new tab.
+
+**When to revisit.** After the friend has actually used it across both languages
+(i.e., after the v1.3 TestFlight + first real feedback). Don't build multi-language
+UX before confirming he reads both in practice with the app — otherwise it's another
+untested-by-others guess.
+
+---
+
 ## Real integration test for SwiftData lightweight migration
 
 **What.** A test that exercises the actual V1 → V2 SwiftData lightweight migration
