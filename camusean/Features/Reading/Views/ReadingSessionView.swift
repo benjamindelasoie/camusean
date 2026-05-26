@@ -13,6 +13,33 @@ struct ReadingSessionView: View {
 
     private static let voicePromptShownKey = "voicePromptShown"
 
+    // A single `.sheet(item:)` presenter. Two `.sheet(isPresented:)` modifiers on
+    // one view is a SwiftUI conflict that eats taps in the presented sheet.
+    private enum ActiveSheet: Identifiable {
+        case summary
+        case voiceOnboarding
+        var id: Self { self }
+    }
+
+    // Derived from the two independent triggers (VM-owned session summary,
+    // view-owned voice prompt). Summary wins if both are somehow set; clearing
+    // resets both so interactive dismissal can't strand a flag.
+    private var activeSheet: Binding<ActiveSheet?> {
+        Binding(
+            get: {
+                if vm.showSummary { return .summary }
+                if showVoiceOnboarding { return .voiceOnboarding }
+                return nil
+            },
+            set: { newValue in
+                if newValue == nil {
+                    vm.showSummary = false
+                    showVoiceOnboarding = false
+                }
+            }
+        )
+    }
+
     var body: some View {
         ZStack {
             if !vm.isSessionActive {
@@ -34,11 +61,15 @@ struct ReadingSessionView: View {
             }
         }
         .animation(.easeInOut(duration: 0.4), value: vm.isSessionActive)
-        .sheet(isPresented: $vm.showSummary) { summarySheet }
-        .sheet(isPresented: $showVoiceOnboarding) {
-            VoiceSetupSheet(languages: VoiceSetup.relevantLanguages()) {
-                UserDefaults.standard.set(true, forKey: Self.voicePromptShownKey)
-                showVoiceOnboarding = false
+        .sheet(item: activeSheet) { sheet in
+            switch sheet {
+            case .summary:
+                summarySheet
+            case .voiceOnboarding:
+                VoiceSetupSheet(languages: VoiceSetup.relevantLanguages()) {
+                    UserDefaults.standard.set(true, forKey: Self.voicePromptShownKey)
+                    showVoiceOnboarding = false
+                }
             }
         }
         .onAppear {
