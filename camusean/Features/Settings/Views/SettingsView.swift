@@ -9,22 +9,21 @@ struct SettingsView: View {
     @State private var showAPIKey = false
     @State private var saveMessage = ""
     @State private var saveSuccess = false
-
-    private let languageOptions: [(name: String, locale: String, flag: String)] = [
-        ("French",     "fr-FR", "🇫🇷"),
-        ("Spanish",    "es-ES", "🇪🇸"),
-        ("Italian",    "it-IT", "🇮🇹"),
-        ("German",     "de-DE", "🇩🇪"),
-        ("Portuguese", "pt-PT", "🇵🇹"),
-    ]
+    @State private var showVoiceSheet = false
 
     var body: some View {
         NavigationStack {
             Form {
                 languageSection
+                voiceSection
                 apiKeySection
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $showVoiceSheet) {
+                VoiceSetupSheet(languages: VoiceSetup.relevantLanguages()) {
+                    showVoiceSheet = false
+                }
+            }
         }
     }
 
@@ -33,7 +32,7 @@ struct SettingsView: View {
     private var languageSection: some View {
         Section {
             Picker(selection: $sourceLanguageLocale) {
-                ForEach(languageOptions, id: \.locale) { option in
+                ForEach(ReadingLanguage.all) { option in
                     HStack(spacing: 10) {
                         Text(option.flag)
                         Text(option.name)
@@ -44,12 +43,45 @@ struct SettingsView: View {
                 Label("Reading language", systemImage: "globe")
             }
             .onChange(of: sourceLanguageLocale) { _, newLocale in
-                sourceLanguageName = languageOptions.first { $0.locale == newLocale }?.name ?? "French"
+                sourceLanguageName = ReadingLanguage.named(locale: newLocale).name
             }
         } header: {
             Text("Language")
         } footer: {
             Text("Words spoken in this language will be transcribed and defined in English.")
+        }
+    }
+
+    // MARK: - Voice Section
+
+    private var voiceSection: some View {
+        Section {
+            ForEach(VoiceSetup.relevantLanguages()) { lang in
+                HStack(spacing: 10) {
+                    Text(lang.flag)
+                    Text(lang.name)
+                    Spacer()
+                    if TTSService.hasEnhancedVoice(forLanguagePrefix: lang.prefix) {
+                        Label("Enhanced", systemImage: "checkmark.circle.fill")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.40))
+                    } else {
+                        Text("Default")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+
+            Button {
+                showVoiceSheet = true
+            } label: {
+                Label("How to download enhanced voices", systemImage: "speaker.wave.2")
+            }
+        } header: {
+            Text("Voice")
+        } footer: {
+            Text("Enhanced voices sound far better than the robotic default. You download them once in iOS Settings.")
         }
     }
 

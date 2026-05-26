@@ -35,7 +35,12 @@ struct ReadingSessionView: View {
         }
         .animation(.easeInOut(duration: 0.4), value: vm.isSessionActive)
         .sheet(isPresented: $vm.showSummary) { summarySheet }
-        .sheet(isPresented: $showVoiceOnboarding) { voiceOnboardingSheet }
+        .sheet(isPresented: $showVoiceOnboarding) {
+            VoiceSetupSheet(languages: VoiceSetup.relevantLanguages()) {
+                UserDefaults.standard.set(true, forKey: Self.voicePromptShownKey)
+                showVoiceOnboarding = false
+            }
+        }
         .onAppear {
             vm.modelContext = modelContext
             evaluateVoiceOnboarding()
@@ -55,78 +60,18 @@ struct ReadingSessionView: View {
 
     // MARK: - Voice onboarding
 
-    // TODO: migrate this onboarding to TipKit when adding a second one-time tip. See TODOS.md.
+    // Auto-prompt once if the app would sound robotic for any language it speaks.
+    // Re-accessible afterward from Settings → Voice.
+    // TODO: migrate this one-time prompt to TipKit when adding a second tip. See TODOS.md.
     private func evaluateVoiceOnboarding() {
         let defaults = UserDefaults.standard
         guard !defaults.bool(forKey: Self.voicePromptShownKey) else { return }
 
-        let sourceLocale = defaults.string(forKey: "sourceLanguageLocale") ?? "fr-FR"
-        let sourcePrefix = String(sourceLocale.prefix(2))
-        let targetPrefix = "en"
-
-        let hasSourceEnhanced = TTSService.hasEnhancedVoice(forLanguagePrefix: sourcePrefix)
-        let hasTargetEnhanced = TTSService.hasEnhancedVoice(forLanguagePrefix: targetPrefix)
-
-        if !hasSourceEnhanced || !hasTargetEnhanced {
+        if VoiceSetup.isAnyVoiceMissing() {
             showVoiceOnboarding = true
         } else {
-            // User has enhanced voices for both locales; never prompt again.
+            // Enhanced voices already installed for everything we speak; never auto-prompt again.
             defaults.set(true, forKey: Self.voicePromptShownKey)
-        }
-    }
-
-    private var voiceOnboardingSheet: some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text("Hear the best voices")
-                .font(.system(size: 26, weight: .bold, design: .serif))
-                .padding(.top, 12)
-
-            Text("Camusean reads definitions out loud. Apple's default voice sounds robotic. The enhanced voices are dramatically better, but you have to download them in iOS Settings.")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .lineSpacing(4)
-
-            VStack(alignment: .leading, spacing: 10) {
-                instructionRow(number: "1", text: "Open Settings.")
-                instructionRow(number: "2", text: "Accessibility → Spoken Content → Voices.")
-                instructionRow(number: "3", text: "Pick English (and your reading language).")
-                instructionRow(number: "4", text: "Tap the cloud icon next to a voice marked Enhanced or Premium.")
-            }
-            .padding(.top, 4)
-
-            Spacer()
-
-            Button {
-                UserDefaults.standard.set(true, forKey: Self.voicePromptShownKey)
-                showVoiceOnboarding = false
-            } label: {
-                Text("Got it")
-                    .font(.body.weight(.semibold))
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 17)
-                    .background(Color.camusean)
-                    .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 15))
-            }
-        }
-        .padding(.horizontal, 28)
-        .padding(.top, 24)
-        .padding(.bottom, 36)
-        .presentationDetents([.medium, .large])
-        .presentationCornerRadius(30)
-        .presentationDragIndicator(.visible)
-    }
-
-    private func instructionRow(number: String, text: String) -> some View {
-        HStack(alignment: .top, spacing: 12) {
-            Text(number)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.camusean)
-                .frame(width: 18, alignment: .leading)
-            Text(text)
-                .font(.callout)
-                .foregroundStyle(.primary.opacity(0.85))
-                .lineSpacing(3)
         }
     }
 
@@ -368,15 +313,17 @@ struct ReadingSessionView: View {
                 .font(.callout)
                 .foregroundStyle(.secondary)
             Spacer()
-            Button("Done") { vm.showSummary = false }
-                .font(.body.weight(.semibold))
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
-                .background(Color.camusean)
-                .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .padding(.horizontal, 28)
-                .padding(.bottom, 36)
+            Button { vm.showSummary = false } label: {
+                Text("Done")
+                    .font(.body.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 18)
+                    .background(Color.camusean)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
+            }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 36)
         }
         .presentationDetents([.medium])
         .presentationCornerRadius(30)
