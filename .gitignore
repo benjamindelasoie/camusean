@@ -18,6 +18,10 @@ DerivedData/
 # macOS
 .DS_Store
 
+# Seeded API key for TestFlight builds (capped/revocable key, never committed).
+# Use Secrets.plist.example as the template.
+camusean/Secrets.plist
+
 # Instruments
 *.trace
 .gstack/

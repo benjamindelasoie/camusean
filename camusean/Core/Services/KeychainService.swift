@@ -34,6 +34,26 @@ enum KeychainService {
         return String(data: data, encoding: .utf8)
     }
 
+    /// Seeds the Keychain from a bundled `Secrets.plist` on first launch, if present.
+    ///
+    /// Used for TestFlight builds so non-technical testers skip the API-key wall:
+    /// a capped, revocable key is baked into the build via the (gitignored) `Secrets.plist`
+    /// resource and copied into the Keychain once — after which it behaves exactly as if the
+    /// user had pasted it in Settings (editable, revocable, persists across launches).
+    ///
+    /// No-op when a key already exists, the file is absent, or the value is still the
+    /// placeholder — in those cases the app falls back to the normal manual-entry flow.
+    static func seedAPIKeyIfNeeded() {
+        if let existing = loadAPIKey(), !existing.isEmpty { return }
+        guard
+            let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
+            let dict = NSDictionary(contentsOf: url),
+            let key = dict["AnthropicAPIKey"] as? String,
+            key.hasPrefix("sk-ant-")
+        else { return }
+        try? saveAPIKey(key)
+    }
+
     static func deleteAPIKey() {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,

@@ -13,6 +13,7 @@ struct camuseanApp: App {
     @State private var containerState: ContainerState
 
     init() {
+        KeychainService.seedAPIKeyIfNeeded()
         _containerState = State(initialValue: Self.loadInitial())
     }
 
