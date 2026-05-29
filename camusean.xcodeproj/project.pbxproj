@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		31947F352FC96AD4002194A5 /* DebugBridgeUI in Frameworks */ = {isa = PBXBuildFile; productRef = 31947F342FC96AD4002194A5 /* DebugBridgeUI */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		318B5B322FB593120046CC90 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -52,6 +56,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				31947F352FC96AD4002194A5 /* DebugBridgeUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -112,6 +117,7 @@
 			);
 			name = camusean;
 			packageProductDependencies = (
+				31947F342FC96AD4002194A5 /* DebugBridgeUI */,
 			);
 			productName = camusean;
 			productReference = 318B5B222FB593100046CC90 /* camusean.app */;
@@ -171,7 +177,7 @@
 			attributes = {
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 2620;
-				LastUpgradeCheck = 2620;
+				LastUpgradeCheck = 2650;
 				TargetAttributes = {
 					318B5B212FB593100046CC90 = {
 						CreatedOnToolsVersion = 26.2;
@@ -195,6 +201,9 @@
 			);
 			mainGroup = 318B5B192FB593100046CC90;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				31947F332FC96AD4002194A5 /* XCLocalSwiftPackageReference "DebugBridge" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 318B5B232FB593100046CC90 /* Products */;
 			projectDirPath = "";
@@ -328,6 +337,7 @@
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
 			};
@@ -385,6 +395,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
+				STRING_CATALOG_GENERATE_SYMBOLS = YES;
 				SWIFT_COMPILATION_MODE = wholemodule;
 				VALIDATE_PRODUCT = YES;
 			};
@@ -582,6 +593,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		31947F332FC96AD4002194A5 /* XCLocalSwiftPackageReference "DebugBridge" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = DebugBridge;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		31947F342FC96AD4002194A5 /* DebugBridgeUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = DebugBridgeUI;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 318B5B1A2FB593100046CC90 /* Project object */;
 }

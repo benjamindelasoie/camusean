@@ -8,12 +8,23 @@
 import SwiftUI
 import SwiftData
 
+#if DEBUG
+import DebugBridgeCore
+import DebugBridgeUI
+#endif
+
 @main
 struct camuseanApp: App {
     @State private var containerState: ContainerState
 
     init() {
         KeychainService.seedAPIKeyIfNeeded()
+        #if DEBUG
+        // gstack /ios-qa bridge: loopback HTTP StateServer for on-device QA.
+        // #if DEBUG-gated — never compiled into Release/TestFlight builds.
+        DebugBridgeUIWiring.installAll()
+        StateServer.shared.start()
+        #endif
         _containerState = State(initialValue: Self.loadInitial())
     }
 

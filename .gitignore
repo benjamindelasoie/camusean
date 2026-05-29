@@ -14,6 +14,7 @@ DerivedData/
 # Swift Package Manager
 .build/
 .swiftpm/
+DebugBridge/.build/
 
 # macOS
 .DS_Store
