@@ -19,6 +19,13 @@ final class SessionViewModel {
     var lookupCount = 0
     var showSummary = false
 
+    // Set when mic/speech permission is denied. iOS won't re-prompt after a denial,
+    // so the start screen shows an "Open Settings" path instead of a terminal red message.
+    var permissionDenied = false
+
+    // The Settings deep-link is exposed here so the view doesn't import UIKit.
+    let settingsURLString = UIApplication.openSettingsURLString
+
     var partialTranscription: String { speechService.partialTranscription }
 
     // Cancel + biased-retry state (locked by /plan-eng-review 2026-05-23).
@@ -42,9 +49,11 @@ final class SessionViewModel {
     var targetName: String { UserDefaults.standard.string(forKey: "targetLanguageName") ?? "English" }
 
     func startSession() async {
+        permissionDenied = false
         let granted = await speechService.requestPermissions()
         guard granted else {
-            phase = .error("Microphone or speech recognition permission denied. Go to Settings to allow access.")
+            permissionDenied = true
+            phase = .error("Microphone and speech access are off. Turn them on to look up words by voice.")
             return
         }
         speechService.setLocale(sourceLocale)
@@ -130,6 +139,23 @@ final class SessionViewModel {
         return candidates.filter { !rejectedSet.contains($0.lowercased()) }
     }
 
+    // Reader-facing copy for a failed lookup. The reader doesn't own (or see) the API key —
+    // they were handed a capped one — so auth/billing/server failures must never tell them to
+    // "check Settings". Technical detail is preserved in logs (AnthropicService + the catch print).
+    nonisolated static func friendlyLookupMessage(for error: Error) -> String {
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
+                return "You're offline — the word is saved, but I couldn't fetch its definition."
+            case .timedOut:
+                return "That took too long. The word is saved; try saying it again."
+            default:
+                break
+            }
+        }
+        return "Couldn't reach the dictionary right now. The word is saved to review."
+    }
+
     private func lookup(word: String) async {
         guard lookupCount < sessionCap else {
             phase = .error("Session limit of \(sessionCap) lookups reached. Words saved.")
@@ -175,9 +201,9 @@ final class SessionViewModel {
             recentlyRejected = []
         } catch {
             if lookupCancelled { return }
-            let msg = error.localizedDescription
+            print("[lookup] error: \(error)")
             currentWord = saveWord(word: word, definition: "", example: "")
-            phase = .error(msg)
+            phase = .error(Self.friendlyLookupMessage(for: error))
             try? AudioSessionManager.shared.activateForPlayback()
             await tts.speak("Couldn't get definition")
             if lookupCancelled { return }

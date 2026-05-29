@@ -5,6 +5,7 @@ struct ReadingSessionView: View {
     @State private var vm = SessionViewModel()
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.openURL) private var openURL
 
     // All words; used only to compute the weekly "learned" count for the progress strip.
     @Query private var allWords: [Word]
@@ -106,6 +107,10 @@ struct ReadingSessionView: View {
         }
     }
 
+    // True until the reader's first word is saved — gates the one-time gesture hint.
+    // Keys off the existing word store, so it needs no separate onboarding flag.
+    private var isFirstTime: Bool { allWords.isEmpty }
+
     // Words "graduated" this week (interval >= 6 days, scheduled, created this week).
     private var learnedThisWeekCount: Int {
         let now = Date()
@@ -182,9 +187,21 @@ struct ReadingSessionView: View {
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 17))
             }
-            Text("Requires microphone & speech recognition")
-                .font(.caption2)
-                .foregroundStyle(Color(.tertiaryLabel))
+            if vm.permissionDenied {
+                // iOS won't re-prompt after a denial — give a direct route to flip it on.
+                Button {
+                    if let url = URL(string: vm.settingsURLString) { openURL(url) }
+                } label: {
+                    Text("Open Settings")
+                        .font(.subheadline.weight(.semibold))
+                        .foregroundStyle(Color.camusean)
+                }
+                .padding(.top, 2)
+            } else {
+                Text("Requires microphone & speech recognition")
+                    .font(.caption2)
+                    .foregroundStyle(Color(.tertiaryLabel))
+            }
         }
     }
 
@@ -263,9 +280,25 @@ struct ReadingSessionView: View {
 
             case .listening:
                 if vm.partialTranscription.isEmpty {
-                    Text("Say a word…")
-                        .font(.callout)
-                        .foregroundStyle(.tertiary)
+                    if isFirstTime {
+                        // One-time teach of the core gesture, until the first word is saved.
+                        VStack(spacing: 10) {
+                            Text("Say a word out loud")
+                                .font(.callout.weight(.medium))
+                                .foregroundStyle(.secondary)
+                            Text("Speak any \(vm.sourceName) word you don't know — I'll define it aloud and save it for review.")
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .multilineTextAlignment(.center)
+                                .lineSpacing(4)
+                                .padding(.horizontal, 12)
+                        }
+                        .transition(.opacity)
+                    } else {
+                        Text("Say a word…")
+                            .font(.callout)
+                            .foregroundStyle(.tertiary)
+                    }
                 } else {
                     Text(vm.partialTranscription)
                         .font(.system(size: 30, weight: .semibold, design: .serif))
