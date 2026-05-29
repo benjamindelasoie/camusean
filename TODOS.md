@@ -9,6 +9,61 @@ note.
 
 ---
 
+## ⏱️ Reduce spoken-word → definition-spoken latency (KEY METRIC)
+
+**What.** Cut the wall-clock time from when the reader finishes saying a word to when
+they hear its meaning. This is the product's core metric — the whole value prop is
+"don't break reading flow," and every extra second of dead air erodes that. Investigate
+every stage of the pipeline; preprocessing, streaming, different models, caching,
+parallelism — all on the table.
+
+**The pipeline today (measure before optimizing).** Speak → `SpeechService` endpoints
+the utterance → `SessionViewModel.lookup` → `AnthropicService` (Claude Haiku over
+URLSession) → JSON parse → `TTSService` speaks word, then definition. Concrete suspected
+contributors and levers, by stage:
+
+1. **Silence endpointing (~1.0s fixed).** `SpeechService.restartSilenceTimer` waits a
+   full second of silence before finalizing (`isFinal`). For single words that's a big,
+   constant tax. Try lowering (0.5–0.7s) and/or dynamic endpointing; tradeoff is cutting
+   off slow/multisyllabic speakers. Measure the false-cutoff rate before committing.
+2. **ASR path: on-device vs server.** `SFSpeechRecognizer` may round-trip to Apple's
+   servers unless `requiresOnDeviceRecognition = true`. On-device is faster for single
+   words, removes a network hop, and works offline. Verify current behavior; test forcing
+   on-device.
+3. **Speak the foreign word in parallel with the network call (HIGH LEVERAGE, LOW RISK).**
+   Today `SessionViewModel.lookup` speaks the word only *after* the API result returns
+   (~line 164). But the transcription is known at `isFinal`, before the request fires.
+   Speaking the word immediately gives instant audible feedback and hides the entire
+   network+inference latency behind the word's own TTS. Strong first thing to try.
+4. **Local cache of already-defined words.** The `Word` store already holds definitions.
+   Check it before calling the API — repeats become instant and free.
+5. **Model/network round trip (biggest variable).** Options: stream the response (SSE) and
+   begin speaking the definition as the first sentence arrives instead of awaiting the full
+   JSON (may require a definition-first/plain-text output format so partials are speakable);
+   prompt-cache the static instruction portion of the prompt; trim `max_tokens` (currently
+   256); pre-warm the HTTPS/TLS connection at session start (URLSession reuse / HTTP-2
+   keep-alive) so the first lookup doesn't pay the handshake; evaluate whether a different
+   fast model meaningfully wins. Haiku is already the fast tier — measure before switching.
+6. **TTS first-utterance warmup.** `AVSpeechSynthesizer` has cold-start latency on its first
+   utterance. Pre-warm with a silent/empty utterance at session start, or keep a warm synth.
+
+**Where.** `camusean/Core/Services/SpeechService.swift` (endpointing, on-device flag),
+`camusean/Core/Services/AnthropicService.swift` (streaming, prompt caching, max_tokens,
+connection reuse), `camusean/Features/Reading/ViewModels/SessionViewModel.swift`
+(parallel word TTS, cache-before-fetch), `camusean/Core/Services/TTSService.swift` (warmup).
+
+**Do this first: instrument, don't guess.** Add timestamp logging at each boundary
+(speech-final → request-sent → first-byte → parsed → TTS-start → audio-out) and capture a
+real breakdown on-device. Optimize the dominant cost first. The likely top two are the 1.0s
+silence timer and the network/inference round trip; #3 (parallel word TTS) probably gives the
+largest *perceived* win for the least risk.
+
+**When to revisit.** High priority — this is the metric. Worth a dedicated session once
+there's a real build on hardware to measure against (post-TestFlight, or on Benja's own
+device now). Pair the measurement harness with the first optimization so wins are provable.
+
+---
+
 ## TipKit for onboarding sheets (post-v1.1)
 
 **What.** Replace the manual `voiceOnboardingSheet` flow in `ReadingSessionView.swift`
