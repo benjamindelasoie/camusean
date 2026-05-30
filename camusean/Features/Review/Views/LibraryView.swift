@@ -84,10 +84,17 @@ struct LibraryView: View {
         Group {
             if allWords.isEmpty {
                 emptyState
-            } else if filteredWords.isEmpty {
-                noMatchesState
             } else {
-                contentList
+                VStack(spacing: 0) {
+                    statsHeader
+                    filterChips
+                    if filteredWords.isEmpty {
+                        noMatchesState
+                            .frame(maxHeight: .infinity)
+                    } else {
+                        contentList
+                    }
+                }
             }
         }
         .navigationTitle("Library")
@@ -116,28 +123,18 @@ struct LibraryView: View {
 
     private var contentList: some View {
         List {
-            Section {
-                ForEach(filteredWords) { word in
-                    libraryRow(for: word)
-                        .listRowInsets(.init(top: 12, leading: 20, bottom: 12, trailing: 20))
-                        .contentShape(Rectangle())
-                        .onTapGesture { selectedWord = word }
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                            Button(role: .destructive) {
-                                delete(word)
-                            } label: {
-                                Label("Delete", systemImage: "trash")
-                            }
+            ForEach(filteredWords) { word in
+                libraryRow(for: word)
+                    .listRowInsets(.init(top: 12, leading: 20, bottom: 12, trailing: 20))
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectedWord = word }
+                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        Button(role: .destructive) {
+                            delete(word)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
                         }
-                }
-            } header: {
-                VStack(spacing: 0) {
-                    statsHeader
-                    filterChips
-                }
-                .background(Color(.systemBackground))
-                .listRowInsets(.init(top: 0, leading: 0, bottom: 0, trailing: 0))
-                .textCase(nil)
+                    }
             }
         }
         .listStyle(.plain)
