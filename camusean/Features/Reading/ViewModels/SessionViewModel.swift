@@ -212,6 +212,18 @@ final class SessionViewModel {
         }
     }
 
+#if DEBUG
+    // QA hook: simulate a word being "heard" without the microphone, driving the
+    // full lookup → Haiku → save → TTS path. /ios-qa can drive synthetic touch but
+    // cannot speak, so this is how the core retrieval flow gets exercised on-device.
+    // Triggered by launching with `-qaWord <word>` (see ReadingSessionView).
+    func debugSimulateHeardWord(_ word: String) async {
+        isSessionActive = true            // render the session screen so the result shows
+        UIApplication.shared.isIdleTimerDisabled = true
+        await lookup(word: word)
+    }
+#endif
+
     @discardableResult
     private func saveWord(word: String, definition: String, example: String) -> Word? {
         guard let context = modelContext else { return nil }

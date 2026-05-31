@@ -12,6 +12,12 @@ struct ReadingSessionView: View {
 
     @State private var showVoiceOnboarding = false
 
+    #if DEBUG
+    // One-shot guard so the QA injection fires once per launch, not on every
+    // tab re-appearance (onAppear re-fires when returning to the Read tab).
+    @State private var qaInjectionFired = false
+    #endif
+
     private static let voicePromptShownKey = "voicePromptShown"
 
     // A single `.sheet(item:)` presenter. Two `.sheet(isPresented:)` modifiers on
@@ -76,6 +82,9 @@ struct ReadingSessionView: View {
         .onAppear {
             vm.modelContext = modelContext
             evaluateVoiceOnboarding()
+            #if DEBUG
+            maybeRunQAInjection()
+            #endif
         }
     }
 
@@ -89,6 +98,21 @@ struct ReadingSessionView: View {
             break
         }
     }
+
+    #if DEBUG
+    // QA mic-bypass: when launched with `-qaWord <word>`, inject that word straight
+    // into the retrieval flow (Haiku → save → TTS) without the microphone. The
+    // value lives in NSUserDefaults' volatile argument domain — set per launch via
+    //   xcrun devicectl device process launch ... com.bdelasoie.camusean -qaWord bonjour
+    // and never persisted. DEBUG-only; compiled out of Release/TestFlight.
+    private func maybeRunQAInjection() {
+        guard !qaInjectionFired,
+              let word = UserDefaults.standard.string(forKey: "qaWord"),
+              !word.isEmpty else { return }
+        qaInjectionFired = true
+        Task { await vm.debugSimulateHeardWord(word) }
+    }
+    #endif
 
     // MARK: - Voice onboarding
 
