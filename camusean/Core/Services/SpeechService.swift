@@ -122,10 +122,15 @@ final class SpeechService {
         partialTranscription = ""
     }
 
+    // How long the user must stay silent after speaking before we finalize the utterance.
+    // These are single foreign words, so we can endpoint aggressively — every 100ms here is
+    // 100ms shaved off every lookup. Tunable; confirm the feel on-device before lowering further.
+    private let silenceTimeout: Duration = .seconds(0.6)
+
     private func restartSilenceTimer() {
         silenceTimer?.cancel()
         silenceTimer = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(1.0))
+            try? await Task.sleep(for: self?.silenceTimeout ?? .seconds(0.6))
             guard !Task.isCancelled else { return }
             self?.endAudioInput()
         }

@@ -173,22 +173,31 @@ final class SessionViewModel {
             return
         }
 
+        // Kick off the definition fetch and echo the word back concurrently. The user just
+        // said this word, so we can pronounce the "correct" native version while Claude is
+        // still generating the definition — the echo hides the network round-trip instead of
+        // stacking on top of it.
+        async let pending = anthropicService.lookup(
+            word: word,
+            sourceLanguage: sourceName,
+            targetLanguage: targetName,
+            apiKey: apiKey
+        )
+
+        try? AudioSessionManager.shared.activateForPlayback()
+        await tts.speak(word, language: sourceLocale)
+        if lookupCancelled {
+            _ = try? await pending  // drain the in-flight request so the async let isn't left dangling
+            return
+        }
+
         do {
-            let result = try await anthropicService.lookup(
-                word: word,
-                sourceLanguage: sourceName,
-                targetLanguage: targetName,
-                apiKey: apiKey
-            )
+            let result = try await pending
             if lookupCancelled { return }
 
             currentWord = saveWord(word: word, definition: result.definition, example: result.exampleSentence)
             lookupCount += 1
             phase = .result(word, result.definition)
-
-            try? AudioSessionManager.shared.activateForPlayback()
-            await tts.speak(word, language: sourceLocale)
-            if lookupCancelled { return }
 
             await tts.speak(result.definition, language: "en-US")
             if lookupCancelled { return }
