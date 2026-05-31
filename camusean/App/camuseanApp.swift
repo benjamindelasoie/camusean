@@ -9,6 +9,7 @@ import SwiftUI
 import SwiftData
 
 #if DEBUG
+import UIKit
 import DebugBridgeCore
 import DebugBridgeUI
 #endif
@@ -24,6 +25,10 @@ struct camuseanApp: App {
         // #if DEBUG-gated — never compiled into Release/TestFlight builds.
         DebugBridgeUIWiring.installAll()
         StateServer.shared.start()
+        // Keep the QA build awake on every screen — not just during an active
+        // reading session. iOS otherwise suspends the app after ~60s on static
+        // screens, freezing the StateServer accept loop (device_not_connected).
+        UIApplication.shared.isIdleTimerDisabled = true
         #endif
         _containerState = State(initialValue: Self.loadInitial())
     }
