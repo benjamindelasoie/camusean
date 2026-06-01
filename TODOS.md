@@ -22,19 +22,18 @@ the utterance → `SessionViewModel.lookup` → `AnthropicService` (Claude Haiku
 URLSession) → JSON parse → `TTSService` speaks word, then definition. Concrete suspected
 contributors and levers, by stage:
 
-1. **Silence endpointing (~1.0s fixed).** `SpeechService.restartSilenceTimer` waits a
-   full second of silence before finalizing (`isFinal`). For single words that's a big,
-   constant tax. Try lowering (0.5–0.7s) and/or dynamic endpointing; tradeoff is cutting
-   off slow/multisyllabic speakers. Measure the false-cutoff rate before committing.
+1. **Silence endpointing.** ✅ **Partly shipped 2026-06-01** — lowered 1.0s → 0.6s via the
+   named `SpeechService.silenceTimeout` constant. _Remaining:_ try 0.5s and/or dynamic
+   endpointing; measure the false-cutoff rate on hardware before lowering further.
 2. **ASR path: on-device vs server.** `SFSpeechRecognizer` may round-trip to Apple's
    servers unless `requiresOnDeviceRecognition = true`. On-device is faster for single
    words, removes a network hop, and works offline. Verify current behavior; test forcing
    on-device.
-3. **Speak the foreign word in parallel with the network call (HIGH LEVERAGE, LOW RISK).**
-   Today `SessionViewModel.lookup` speaks the word only *after* the API result returns
-   (~line 164). But the transcription is known at `isFinal`, before the request fires.
-   Speaking the word immediately gives instant audible feedback and hides the entire
-   network+inference latency behind the word's own TTS. Strong first thing to try.
+3. **Speak the foreign word in parallel with the network call.** ✅ **Shipped 2026-06-01** —
+   `SessionViewModel.lookup` now fires the definition request as `async let pending` and
+   speaks the native word echo concurrently, so the echo hides the network round-trip
+   instead of stacking after it. The echo now also fires before the result is known (so a
+   failed/offline lookup still echoes the word, then reports the failure).
 4. **Local cache of already-defined words.** The `Word` store already holds definitions.
    Check it before calling the API — repeats become instant and free.
 5. **Model/network round trip (biggest variable).** Options: stream the response (SSE) and
@@ -208,3 +207,102 @@ should treat DESIGN.md as the source of truth.
 **When to revisit.** Whenever a PR introduces UI changes that aren't covered by the
 existing tokens. Add the new token to DESIGN.md in the same PR — stale design docs
 are worse than no design doc.
+
+---
+
+## 📚 Frequent-word definition cache (local dictionary, "Regime A")
+
+**What.** A local definition cache so common words resolve **instantly, offline, and
+free** — no Anthropic round-trip. Lookup path becomes:
+
+```
+spoken word
+  → NaturalLanguage lemmatize (on-device)        ← maps inflections to the dictionary form
+  → local dictionary cache (bundled + lazy)       ← majority of lookups: instant, offline
+  → [miss] Claude Haiku, prompted to match the    ← rare tail only
+           dictionary's terse gloss style
+```
+
+**Why we deferred (2026-06-01).** We chose the Haiku-only path for v1. The cache only
+earns its real complexity (lemmatization, dictionary parsing, frozen quality, homograph
+senses, attribution, a build pipeline) once one of these is true:
+- **Offline reading is a real user scenario** (subway / plane / spotty cell) — the cache
+  is the *only* way to work offline; the live path can never.
+- **API cost / the 200-lookup daily cap is binding** — every cache hit is an Anthropic
+  call avoided, which materially extends the pre-seeded **capped key** onboarding runway.
+  (Benja flagged this cost-reduction angle as a standalone reason to want it.)
+
+Until then, prefer the cheap live-path optimizations (see the latency TODO: drop the
+example from the live call / trim `max_tokens`, pre-warm the connection) and measure
+whether they're "good enough on wifi" before building this.
+
+**Design decisions already made (so we don't re-litigate):**
+- **Source the cache from a dictionary, NOT from Anthropic** — regeneration must never
+  call the API (explicit Benja requirement). Candidates:
+  - **Kaikki.org / wiktextract** (Kaikki = the published JSON output of the wiktextract
+    parser): broad coverage, multiple senses, **includes IPA**, *some* usage examples.
+    License CC BY-SA (needs an attribution screen). More parsing/curation — entries are
+    multi-sense and must be trimmed to one spoken-friendly gloss.
+  - **FreeDict `fra-eng`** (TEI XML): terse bilingual glosses (already close to
+    spoken-ready), simpler to parse, lighter license, but thinner coverage and almost
+    no examples.
+- **Lemmatization is mandatory**, via Apple's `NaturalLanguage` (`NLTagger` `.lemma`),
+  on-device/free. Without it the cache misses most real (inflected) speech.
+- **Consistency:** keep ONE voice across tiers by making the *live Haiku fallback* imitate
+  the dictionary's terse style — not the other way round. Resolves the cache/live style seam
+  without putting Anthropic in the regen loop.
+- **Store:** hybrid — ship a bundled top-N (~5–10k, ~1–2MB, a non-issue) AND lazily write
+  the user's tail lookups into the same store. Fast on day one, personalizes over time.
+- **Examples are a known downgrade** vs Haiku: dictionary examples are patchy/absent.
+  Accept empty examples (Review already handles them) or lazily backfill via Haiku on first
+  review (reintroduces the API, just deferred).
+- **Homographs** (*livre* = book/pound): cache the most-frequent sense; let the existing
+  reject/retry gesture force a live, cache-bypassing lookup for the wrong-sense case.
+- Cache is **per language pair** (keyed by source+target). Trivial at current 1-pair scope.
+
+**Where.** New `DefinitionProvider` (cache-then-network) in front of `AnthropicService`;
+`NaturalLanguage` lemmatizer in the lookup path; a one-time generation script (frequency
+list + Kaikki/FreeDict → extraction/trim → bundled file). Frequency list from
+Lexique.org or OpenSubtitles freq lists (word lists aren't copyrightable; glosses are the
+dictionary's, under its license).
+
+**When to revisit.** When offline reading proves a real use case, OR when the daily cap /
+API cost starts biting onboarding — whichever comes first. Also revisit if the live-path
+latency work lands and still isn't fast/consistent enough on cellular.
+
+---
+
+## 🔊 Speech (TTS) quality — beyond Apple's system voices
+
+**What.** Replace or augment `AVSpeechSynthesizer` for smoother, more natural speech.
+Apple's system voices — even Enhanced/Premium — aren't SOTA-smooth, and Benja noted this.
+
+**Why (and why it becomes urgent later).** Once retrieval latency is hidden (echo overlap
+shipped; cache or live-path work to come), **TTS becomes both the dominant remaining
+latency AND the main perceived-quality surface** of the whole experience. The voice *is*
+the product at that point.
+
+**Options (poles):**
+- **On-device neural TTS** — e.g. **Kokoro (82M, MIT)** or **Piper**, via CoreML/ONNX.
+  Cloud-ish quality, **offline, free, private**, zero network latency. Cost: model
+  bundling + multilingual voice setup. Best fit for Camusean's ethos; pairs naturally
+  with the offline cache above (offline retrieval + offline TTS = fully offline sessions).
+- **Low-latency cloud TTS** — **Cartesia Sonic** or **ElevenLabs Flash**: best naturalness,
+  streams with ~75–150ms time-to-first-audio. Cost: network dependency + per-use cost +
+  another key — fights the instant/offline feel. If used, apply it **only to the English
+  definition**, never the foreign word.
+- **Max out AVSpeech (cheapest)** — actively guide users to download the Enhanced/Premium
+  voice (we already detect it via `TTSService.hasEnhancedVoice`); use
+  `AVSpeechSynthesisIPANotation` for tricky foreign words (Kaikki provides IPA if we adopt
+  it). Zero new deps; ceiling is still "system voice."
+
+**Hard constraint:** whatever engine handles the English definition, keep the **foreign
+word echo on a native-locale voice** — a native voice pronounces the word correctly, which
+is the whole point of the echo (the "hear the correct pronunciation" feature).
+
+**Where.** `camusean/Core/Services/TTSService.swift` (currently `AVSpeechSynthesizer` +
+`bestVoice(for:)`). A new engine would slot behind the same `speak(_:language:)` interface.
+
+**When to revisit.** After the live-path latency work lands (TTS becomes the budget), or on
+the first real tester complaint about voice quality. Consider pairing with the cache TODO
+for a fully-offline path.
