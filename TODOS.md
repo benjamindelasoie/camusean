@@ -306,3 +306,27 @@ is the whole point of the echo (the "hear the correct pronunciation" feature).
 **When to revisit.** After the live-path latency work lands (TTS becomes the budget), or on
 the first real tester complaint about voice quality. Consider pairing with the cache TODO
 for a fully-offline path.
+
+---
+
+## 🎨 Polish the app icon (current one is a good-enough placeholder)
+
+**What.** The shipped icon (book + radial soundwave on deep amber, "the book speaks") was
+hand-built in SVG and is solid for the TestFlight build, but Benja wants to take it to a
+dedicated icon tool (Claude design / Figma / a designer) for a more refined pass before any
+public release.
+
+**Where the source lives.** Vector source + all explored directions are at
+`~/.gstack/projects/camusean/designs/app-icon-20260601/`:
+- `svg/nv3.html` — the chosen icon (deep amber #B0631A, cream #F5ECD9, espresso #2E2114).
+- `mockups2.html` / `mockups.html` — the full exploration galleries.
+- Wired into the app at `camusean/Assets.xcassets/AppIcon.appiconset/AppIcon.png`
+  (single 1024×1024, no alpha; light only — no dark/tinted appearance variants yet).
+
+**Ideas for the polish pass.** Optical-center the mark (it sits slightly low); try dark +
+tinted iOS 18 appearance variants; refine the soundwave weight/spacing; test legibility at
+40px on a real home screen; consider a subtle page-curl or paper texture. Keep the brand
+amber/cream/espresso palette and the book↔voice concept.
+
+**When to revisit.** Before a public App Store release (TestFlight-with-friends is fine as
+is). Low urgency.
