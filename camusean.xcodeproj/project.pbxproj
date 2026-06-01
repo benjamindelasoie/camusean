@@ -411,6 +411,7 @@
 				DEVELOPMENT_TEAM = LWQ9NP6HVT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Camusean needs the microphone to hear words you say during reading sessions.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Camusean uses speech recognition to transcribe the words you say.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -445,6 +446,7 @@
 				DEVELOPMENT_TEAM = LWQ9NP6HVT;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Camusean needs the microphone to hear words you say during reading sessions.";
 				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Camusean uses speech recognition to transcribe the words you say.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
