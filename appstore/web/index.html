@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Camusean — Read in another language without breaking your stride</title>
+<meta name="description" content="Camusean is a hands-free reading companion. Say an unknown word aloud while reading a foreign-language book and instantly hear its definition, then review saved words as flashcards.">
+<style>
+  :root {
+    --cream: #f4eedf;
+    --cream-deep: #ece0c4;
+    --ink: #2c2620;
+    --ink-soft: #6b5f4e;
+    --gold-top: #f0b45a;
+    --gold-bot: #7a3f12;
+    --amber: #a65a1e;
+    --rule: #e0d4ba;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--cream);
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 720px; margin: 0 auto; padding: 0 24px; }
+  h1, h2, .wordmark { font-family: Georgia, "Times New Roman", serif; }
+
+  /* hero */
+  header { text-align: center; padding: 88px 0 64px; }
+  .icon {
+    width: 112px; height: 112px; margin: 0 auto 28px;
+    border-radius: 25px;
+    background: radial-gradient(120% 120% at 50% 0%, #fbf6ea 0%, var(--cream) 45%, var(--cream-deep) 100%);
+    box-shadow: 0 12px 32px rgba(122,63,18,.18), inset 0 0 0 1px rgba(122,63,18,.06);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .icon span {
+    font-family: Georgia, serif; font-weight: 700; font-size: 78px; line-height: 1;
+    background: linear-gradient(180deg, var(--gold-top) 0%, var(--amber) 55%, var(--gold-bot) 100%);
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    margin-top: -4px;
+  }
+  .wordmark { font-size: 22px; letter-spacing: .04em; color: var(--amber); margin-bottom: 36px; }
+  h1 { font-size: 40px; line-height: 1.18; font-weight: 700; margin-bottom: 18px; }
+  .lede { font-size: 19px; color: var(--ink-soft); max-width: 30em; margin: 0 auto; }
+
+  section { padding: 44px 0; border-top: 1px solid var(--rule); }
+  h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .14em; color: var(--amber); margin-bottom: 22px; font-weight: 700; }
+
+  ol.steps { list-style: none; counter-reset: s; }
+  ol.steps li { counter-increment: s; position: relative; padding: 10px 0 10px 52px; font-size: 18px; }
+  ol.steps li::before {
+    content: counter(s); position: absolute; left: 0; top: 8px;
+    width: 34px; height: 34px; border-radius: 50%;
+    background: linear-gradient(180deg, var(--gold-top), var(--amber));
+    color: #fff; font-family: Georgia, serif; font-weight: 700;
+    display: flex; align-items: center; justify-content: center; font-size: 16px;
+  }
+
+  ul.feats { list-style: none; display: grid; gap: 14px; }
+  ul.feats li { font-size: 17px; padding-left: 26px; position: relative; }
+  ul.feats li::before { content: "—"; position: absolute; left: 0; color: var(--amber); }
+  ul.feats b { font-weight: 600; }
+
+  .quiet { color: var(--ink-soft); font-size: 17px; }
+  .quiet a { color: var(--amber); }
+
+  footer { text-align: center; padding: 48px 0 72px; border-top: 1px solid var(--rule); color: var(--ink-soft); font-size: 15px; }
+  footer a { color: var(--amber); text-decoration: none; }
+  footer a:hover { text-decoration: underline; }
+  footer .dot { margin: 0 8px; opacity: .5; }
+
+  @media (max-width: 520px) {
+    header { padding: 64px 0 44px; }
+    h1 { font-size: 31px; }
+    .lede { font-size: 17px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div class="icon"><span>C</span></div>
+    <div class="wordmark">Camusean</div>
+    <h1>Read in another language<br>without breaking your stride.</h1>
+    <p class="lede">Say an unknown word aloud while you read, and hear what it
+      means — without putting the book down or losing the sentence.</p>
+  </header>
+
+  <section id="how">
+    <h2>How it works</h2>
+    <ol class="steps">
+      <li>Start a reading session and keep the book in your hands.</li>
+      <li>Hit a word you don't know? Hold the button and say it out loud.</li>
+      <li>Hear the definition spoken back in your own language, instantly.</li>
+      <li>Find every word you said waiting as a flashcard, ready to review.</li>
+    </ol>
+  </section>
+
+  <section id="why">
+    <h2>Built for real reading</h2>
+    <ul class="feats">
+      <li><b>Voice-first.</b> Designed for hands-on-the-book reading, not screen tapping.</li>
+      <li><b>Spoken definitions.</b> Your eyes stay on the page.</li>
+      <li><b>For books and flow,</b> not drills, streaks, or gamified busywork.</li>
+      <li><b>Your languages.</b> Read in one, hear definitions in your own.</li>
+      <li><b>Private by design.</b> No account, no ads; your words stay on your device.</li>
+    </ul>
+  </section>
+
+  <section id="support">
+    <h2>Support</h2>
+    <p class="quiet">Questions, bugs, or a word that came back wrong?
+      Email <a href="mailto:delasoiebenja@icloud.com">delasoiebenja@icloud.com</a>
+      and you'll hear back from the person who built the app.</p>
+  </section>
+
+  <footer>
+    Camusean
+    <span class="dot">·</span>
+    <a href="privacy.html">Privacy</a>
+    <span class="dot">·</span>
+    <a href="mailto:delasoiebenja@icloud.com">Contact</a>
+  </footer>
+
+</div>
+</body>
+</html>

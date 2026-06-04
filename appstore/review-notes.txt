@@ -1,0 +1,32 @@
+CAMUSEAN — APP REVIEW NOTES
+(Paste into App Store Connect → [your build] → App Review Information → Notes. Max 4000 chars.)
+
+Camusean is a hands-free reading companion: while reading a physical book in a
+foreign language, you speak an unknown word aloud and instantly hear its
+definition spoken back, then review saved words as flashcards later. The voice
+lookup is the core, differentiating feature — please test it directly.
+
+No account or login is required. Everything works on first launch (the
+dictionary service is pre-configured).
+
+IMPORTANT — the core feature is voice-based and must be tested on a PHYSICAL
+DEVICE. iOS speech recognition does not run in the Simulator, so on a Simulator
+the app will look like a simple flashcard app. On a real device it is a
+voice-driven lookup tool. To experience it:
+
+1. Open the app → "Read" tab → tap "Start Session".
+2. When prompted, allow Microphone and Speech Recognition.
+3. Hold the push-to-talk button and say a French word aloud,
+   e.g. "bibliothèque" or "flâneur".
+4. Release. Within about one second you will HEAR the English definition
+   spoken aloud, see it on screen, and the word is saved automatically.
+5. Open the "Review" tab to study saved words as flashcards (swipe left = known).
+
+Default reading language is French; it can be changed in Settings.
+
+This is a single, original app built by one independent developer — not a
+template, reskin, or clone. The concept (speak-a-word-aloud-while-reading) and
+all code are original. We are happy to answer any questions or schedule a call
+to walk through the app.
+
+Contact: delasoiebenja@icloud.com
