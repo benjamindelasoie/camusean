@@ -2,6 +2,7 @@ import Foundation
 import SwiftData
 import Observation
 import UIKit
+import Dependencies
 
 enum SessionPhase {
     case idle
@@ -38,7 +39,10 @@ final class SessionViewModel {
     let rejectionCap: Int = 3
 
     private let sessionCap = 50
-    private let speechService = SpeechService()
+    // Resolved through swift-dependencies: the live OS-appropriate recognizer in the app,
+    // an overridable seam in tests/previews. @ObservationIgnored because @Dependency is its
+    // own property wrapper and must not be wrapped again by @Observable.
+    @ObservationIgnored @Dependency(\.speechRecognizer) private var speechService
     private let anthropicService = AnthropicService()
     private let tts = TTSService.shared
     private var listeningTask: Task<Void, Never>?

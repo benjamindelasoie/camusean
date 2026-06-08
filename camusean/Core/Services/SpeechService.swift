@@ -2,9 +2,12 @@ import Speech
 import AVFoundation
 import Observation
 
+// SFSpeechRecognizer-based backend (iOS 18–25, and the fallback whenever the iOS 26
+// DictationTranscriber path isn't available). Unchanged behavior — this is the speech
+// engine the app has always shipped; it now just satisfies the SpeechRecognizing seam.
 @Observable
 @MainActor
-final class SpeechService {
+final class LegacySpeechRecognizer: SpeechRecognizing {
     // Live transcription shown while user is speaking
     var partialTranscription: String = ""
 
@@ -15,25 +18,9 @@ final class SpeechService {
     private var continuation: CheckedContinuation<[String], Never>?
     private var silenceTimer: Task<Void, Never>?
 
-    // Pure string-level helper, extracted from listenForCandidates so it can be unit-tested
-    // without driving the SFSpeechRecognizer.
-    //
-    // Behavior: trims whitespace, drops empty entries, dedupes case-insensitively (keeping
-    // first occurrence and its original casing), caps the returned array at `max` entries.
-    nonisolated static func extractDistinctTranscriptions(from strings: [String], max: Int = 3) -> [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for s in strings {
-            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !trimmed.isEmpty else { continue }
-            let key = trimmed.lowercased()
-            if seen.insert(key).inserted {
-                result.append(trimmed)
-                if result.count >= max { break }
-            }
-        }
-        return result
-    }
+    // Constructing the recognizer touches no main-actor state, so the factory (and the
+    // swift-dependencies live value) can build it from a nonisolated context.
+    nonisolated init() {}
 
     func setLocale(_ identifier: String) {
         recognizer = SFSpeechRecognizer(locale: Locale(identifier: identifier))
@@ -89,7 +76,7 @@ final class SpeechService {
                         if result.isFinal {
                             self.silenceTimer?.cancel()
                             let raw = result.transcriptions.map { $0.formattedString }
-                            let distinct = Self.extractDistinctTranscriptions(from: raw)
+                            let distinct = SpeechRecognition.extractDistinctTranscriptions(from: raw)
                             self.partialTranscription = ""
                             self.continuation?.resume(returning: distinct)
                             self.continuation = nil
@@ -107,12 +94,6 @@ final class SpeechService {
 
         teardown()
         return candidates
-    }
-
-    // Backwards-compatibility shim while SessionViewModel still calls the single-word API.
-    // Will be removed once T3 migrates the callsite to listenForCandidates.
-    func listenForOneWord() async -> String? {
-        await listenForCandidates().first
     }
 
     func reset() {

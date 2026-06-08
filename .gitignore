@@ -2,8 +2,11 @@
 *.xcuserstate
 xcuserdata/
 **/xcuserdata/
-xcshareddata/
-**/xcshareddata/
+xcshareddata/*
+**/xcshareddata/*
+# ...but keep SPM dependency pins under version control for reproducible builds
+!**/xcshareddata/swiftpm/
+!**/xcshareddata/swiftpm/Package.resolved
 DerivedData/
 *.moved-aside
 *.pbxuser

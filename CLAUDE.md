@@ -3,18 +3,18 @@
 Voice reading companion — say a foreign word aloud during a reading session, hear the definition instantly, review saved words as flashcards later.
 
 ## Quick Reference
-- **Platform**: iOS 18+
-- **Language**: Swift 6.0 (strict concurrency enabled)
+- **Platform**: iOS 18+ (iOS 26+ unlocks the newer on-device speech path)
+- **Language**: Swift 6 language mode (complete strict concurrency). `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor` on the app + unit-test targets — types default to `@MainActor`; the UITest target stays nonisolated (XCTest compatibility).
 - **UI Framework**: SwiftUI
-- **Architecture**: MVVM with `@Observable`
-- **Persistence**: SwiftData
-- **Package Manager**: Swift Package Manager (no external packages currently)
+- **Architecture**: MVVM with `@Observable`; services injected via swift-dependencies
+- **Persistence**: SwiftData (versioned schema + migration)
+- **Package Manager**: Swift Package Manager. External packages: `pointfreeco/swift-dependencies` (dependency injection).
 - **Bundle ID**: com.bdelasoie.camusean
 
 ## XcodeBuildMCP Integration
-**IMPORTANT**: This project uses XcodeBuildMCP for all Xcode operations.
-- Build: `mcp__xcodebuildmcp__build_sim_name_proj`
-- Test: `mcp__xcodebuildmcp__test_sim_name_proj`
+**IMPORTANT**: This project uses XcodeBuildMCP for all Xcode operations. It runs on **session defaults** — call `session_show_defaults` once before the first build/test; once project/scheme/simulator are set, the tools below take no args.
+- Compile-check: `mcp__xcodebuildmcp__build_sim`
+- Test: `mcp__xcodebuildmcp__test_sim` (to spare the machine, `xcodebuild test-without-building -only-testing:camuseanTests` runs just the unit suite, no UITests/audio)
 - Clean: `mcp__xcodebuildmcp__clean`
 
 The `.xcodeproj` is at `camusean.xcodeproj` (same directory as this file). Swift sources live one level down in `camusean/` (the `PBXFileSystemSynchronizedRootGroup`).
@@ -44,11 +44,14 @@ camusean/                        ← repo root (you are here)
         ├── Models/
         │   └── Word.swift                   # SwiftData model
         └── Services/
-            ├── AnthropicService.swift        # Claude Haiku API calls via URLSession
-            ├── AudioSessionManager.swift     # AVAudioSession lifecycle (@MainActor)
-            ├── KeychainService.swift         # API key storage (Security framework)
-            ├── SpeechService.swift           # SFSpeechRecognizer, push-to-talk
-            └── TTSService.swift              # AVSpeechSynthesizer (@MainActor delegate)
+            ├── AnthropicService.swift            # Claude Haiku API calls via URLSession
+            ├── AudioSessionManager.swift         # AVAudioSession lifecycle (@MainActor)
+            ├── KeychainService.swift             # API key storage (Security framework)
+            ├── SpeechRecognizing.swift           # `SpeechRecognizing` protocol seam + `SpeechRecognition.make()` factory + shared candidate helper
+            ├── SpeechService.swift               # LegacySpeechRecognizer — SFSpeechRecognizer backend (iOS 18–25)
+            ├── DictationSpeechRecognizer.swift   # iOS 26+ backend — SpeechAnalyzer + DictationTranscriber (on-device)
+            ├── SpeechRecognizerDependency.swift  # swift-dependencies registration for the speech seam
+            └── TTSService.swift                  # AVSpeechSynthesizer (@MainActor delegate)
 ```
 
 > **Note**: Xcode auto-discovers all `.swift` files in this directory via filesystem sync — no need to manually add files to the project. Just create the file on disk and it's included.
@@ -61,11 +64,24 @@ camusean/                        ← repo root (you are here)
 - `AVAudioSession` must be called from `@MainActor` — use `AudioSessionManager.shared`.
 - `TTSService` must be `@MainActor NSObject` to satisfy `AVSpeechSynthesizerDelegate` (Objective-C delegate + Swift 6 strict concurrency requirement).
 - `SFSpeechRecognizer` callbacks arrive on background threads — always hop to `@MainActor` with `Task { @MainActor in ... }`.
+- One sanctioned `nonisolated(unsafe)`: `AVAudioConverter`'s `@Sendable` input block must return a non-Sendable `AVAudioPCMBuffer` (`DictationSpeechRecognizer.BufferConverter`). It's an AVFoundation annotation gap, not a real race — the block runs synchronously on the same thread.
+
+### Speech recognition (two backends behind one seam)
+- All speech-to-text goes through the `SpeechRecognizing` protocol. `SpeechRecognition.make()` selects by OS: **iOS 26+ → `DictationSpeechRecognizer`** (Apple's on-device `SpeechAnalyzer` + `DictationTranscriber`), **iOS 18–25 → `LegacySpeechRecognizer`** (`SFSpeechRecognizer`).
+- View models depend on the protocol, never a concrete backend. Both share the `SpeechRecognition.extractDistinctTranscriptions` candidate helper and the same 0.6s aggressive endpointing.
+- `DictationTranscriber` (not `SpeechTranscriber`) is deliberate: it reuses system dictation assets — no large model download.
+- **Known gap**: if `DictationTranscriber` doesn't support the source locale, `listenForCandidates()` returns `[]` (silent degrade). fr-FR + the shipped languages are all system dictation languages. A per-locale fallback to the legacy recognizer is the close-the-gap move if a user's language isn't supported.
+
+### Dependency injection (swift-dependencies)
+- Inject services via swift-dependencies; don't construct them inline. Pattern: a `DependencyKey` with **`nonisolated`** `liveValue`/`testValue`/`previewValue`, surfaced on `DependencyValues`, consumed with `@ObservationIgnored @Dependency(\.x)` in `@Observable` view models. Reference: `SpeechRecognizerDependency.swift`.
+- The getters MUST be `nonisolated` (the module defaults to MainActor isolation, but swift-dependencies' requirements are nonisolated); build backends through a `nonisolated init`.
+- `testValue`/`previewValue` should be inert so tests/previews never hit hardware unless they explicitly override the dependency.
+- New injectable services should adopt this seam (AnthropicService, TTSService, KeychainService are migration candidates).
 
 ### SwiftData
-- Single model: `Word` — `word`, `definition`, `exampleSentence`, `sourceLanguage`, `targetLanguage`, `timestamp`, `isKnown: Bool`.
+- Single model: `Word` (schema `CamuseanSchemaV2`) — `word`, `definition`, `exampleSentence`, `sourceLanguage`, `targetLanguage`, `timestamp`, `isKnown` (deprecated, kept on disk for back-compat), plus SM-2 SRS fields `interval`, `easeFactor`, `nextReviewDate` (all with schema-level defaults).
 - `ModelContainer` is set up once in `camuseanApp` and injected via `.modelContainer()`.
-- No migrations needed yet (MVP, single model, no schema changes).
+- **Versioned schema with migration**: V1→V2 lives in `CamuseanMigrationPlan.swift`. New persisted fields need property-level defaults or migration fails with "missing attribute values on mandatory destination attribute".
 
 ### API key
 - Stored in iOS Keychain via `KeychainService` (Security framework).
@@ -98,13 +114,14 @@ camusean/                        ← repo root (you are here)
 - Unit tests go in `camuseanTests/`.
 - UI tests go in `camuseanUITests/`.
 - Priority test targets: `AnthropicService` (mock URLSession), `Word` SwiftData CRUD, `KeychainService`.
-- Manual device tests required for audio (speech recognition and TTS don't work in Simulator).
+- Speech is injected via swift-dependencies — `SessionViewModel()` resolves the inert `NoopSpeechRecognizer` in tests by default; override with `withDependencies { $0.speechRecognizer = ... }` to drive the lookup flow without a mic.
+- Manual device tests required for audio (real-mic recognition and TTS don't work in Simulator) — this includes validating the iOS 26 `DictationSpeechRecognizer` path.
 
 ## DO NOT
 - Use `@AppStorage` inside `@Observable` classes — they clash at the macro expansion level. Use `UserDefaults.standard` computed properties instead.
 - Call `AVAudioSession` from a plain `actor` — use `@MainActor` for all audio session management.
 - Use the deprecated `@ObservedObject` / `@StateObject` / `ObservableObject` pattern.
-- Add features beyond MVP scope: no user accounts, no cloud sync, no SRS algorithm, no multiple language pairs (yet).
+- Add features beyond current scope: no user accounts, no cloud sync. (SRS scheduling and multiple reading languages already shipped — those are in-scope, not off-limits.)
 - Hardcode the Anthropic API key anywhere in source.
 - Use `UIKit` for anything covered by SwiftUI.
 
