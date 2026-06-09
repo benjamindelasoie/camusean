@@ -29,6 +29,17 @@ final class SessionViewModel {
 
     var partialTranscription: String { speechService.partialTranscription }
 
+    // Mirrored recognizer diagnostics for the session debug overlay. The recognizer is held
+    // as `@ObservationIgnored @Dependency` and typed as a bare `any SpeechRecognizing`
+    // existential, so SwiftUI can't observe changes inside it — we copy the values into these
+    // stored @Observable props from the @MainActor listening loop so the HUD updates live.
+    var debugBackendName = ""
+    var debugLocaleSupported: Bool? = nil
+    var debugLastError: String? = nil
+    var lastCandidates: [String] = []
+
+    var debugPhaseLabel: String { Self.phaseLabel(phase) }
+
     // Cancel + biased-retry state (locked by /plan-eng-review 2026-05-23).
     // Internal (not private) so test target can read via @testable import.
     var currentWord: Word?
@@ -69,6 +80,13 @@ final class SessionViewModel {
             while !Task.isCancelled {
                 phase = .listening
                 let candidates = await speechService.listenForCandidates()
+
+                // Mirror recognizer diagnostics for the debug overlay (we're on @MainActor here).
+                lastCandidates = candidates
+                debugBackendName = speechService.backendName
+                debugLocaleSupported = speechService.localeSupported
+                debugLastError = speechService.lastErrorMessage
+
                 guard !Task.isCancelled else { break }
 
                 let filtered = Self.filterCandidates(
@@ -125,6 +143,17 @@ final class SessionViewModel {
         }
 
         phase = .listening
+    }
+
+    // Compact label for the current phase, shown in the session debug overlay.
+    nonisolated static func phaseLabel(_ phase: SessionPhase) -> String {
+        switch phase {
+        case .idle: return "idle"
+        case .listening: return "listening"
+        case .processing(let w): return "processing(\(w))"
+        case .result(let w, _): return "result(\(w))"
+        case .error: return "error"
+        }
     }
 
     // Pure helper. Filters out candidates that match a recent rejection within the TTL,

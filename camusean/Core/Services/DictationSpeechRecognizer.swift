@@ -21,6 +21,11 @@ import os
 final class DictationSpeechRecognizer: SpeechRecognizing {
     var partialTranscription: String = ""
 
+    // Diagnostics surfaced by the session debug overlay.
+    let backendName = "Dictation · SpeechAnalyzer (iOS 26)"
+    private(set) var localeSupported: Bool?
+    private(set) var lastErrorMessage: String?
+
     private var localeIdentifier: String = "en-US"
 
     private let engine = AVAudioEngine()
@@ -63,9 +68,13 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
         teardown()
         candidates = []
         partialTranscription = ""
+        lastErrorMessage = nil
 
         do { try AudioSessionManager.shared.activateForRecording() }
-        catch { return [] }
+        catch {
+            lastErrorMessage = "audio session: \(error.localizedDescription)"
+            return []
+        }
 
         let locale = Locale(identifier: localeIdentifier)
         let transcriber = DictationTranscriber(
@@ -85,6 +94,7 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
             // waits for the next utterance. (A per-locale fallback to the legacy recognizer
             // would close this gap — see the note in the research write-up.)
             print("[Dictation] model/locale unavailable for \(localeIdentifier): \(error)")
+            lastErrorMessage = "model/locale unavailable for \(localeIdentifier): \(error.localizedDescription)"
             teardown()
             return []
         }
@@ -233,7 +243,11 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
 
     private func isSupported(_ locale: Locale) async -> Bool {
         let supported = await DictationTranscriber.supportedLocales
-        return supported.contains { $0.identifier(.bcp47) == locale.identifier(.bcp47) }
+        let ok = supported.contains { $0.identifier(.bcp47) == locale.identifier(.bcp47) }
+        // Cache the real signal (locale present in the supported set) so the debug overlay
+        // can read it synchronously — kept distinct from a later asset-download failure.
+        localeSupported = ok
+        return ok
     }
 
     enum RecognizerError: Error { case localeNotSupported }

@@ -12,6 +12,10 @@ struct ReadingSessionView: View {
 
     @State private var showVoiceOnboarding = false
 
+    // Runtime-toggled (Settings → Developer) live recognition diagnostics panel.
+    // Not #if DEBUG on purpose — it must be available to diagnose Release/TestFlight builds.
+    @AppStorage("showSessionDebugOverlay") private var showSessionDebugOverlay = false
+
     #if DEBUG
     // One-shot guard so the QA injection fires once per launch, not on every
     // tab re-appearance (onAppear re-fires when returning to the Read tab).
@@ -256,6 +260,52 @@ struct ReadingSessionView: View {
                 .font(.subheadline)
                 .foregroundStyle(Color(.tertiaryLabel))
                 .padding(.bottom, 40)
+        }
+        .safeAreaInset(edge: .top) {
+            if showSessionDebugOverlay { debugOverlay }
+        }
+    }
+
+    // MARK: - Debug Overlay
+
+    // Live recognition diagnostics, shown only when the Settings → Developer toggle is on.
+    // Reads mirrored state off the view model (see SessionViewModel.debug* props); the
+    // `candidates: —` line is the silent-degrade tell when the recognizer hears nothing.
+    private var debugOverlay: some View {
+        let supported: String = {
+            switch vm.debugLocaleSupported {
+            case .some(true): return "yes"
+            case .some(false): return "no"
+            case .none: return "unknown"
+            }
+        }()
+        return VStack(alignment: .leading, spacing: 2) {
+            debugRow("backend", vm.debugBackendName.isEmpty ? "—" : vm.debugBackendName)
+            debugRow("locale", "\(vm.sourceLocale) · supported: \(supported)")
+            debugRow("phase", vm.debugPhaseLabel)
+            debugRow("partial", vm.partialTranscription.isEmpty ? "—" : vm.partialTranscription)
+            debugRow("candidates", vm.lastCandidates.isEmpty ? "—" : vm.lastCandidates.joined(separator: " | "))
+            debugRow("error", vm.debugLastError ?? "—", tint: vm.debugLastError == nil ? nil : .red)
+            debugRow("counts", "lookups \(vm.lookupCount) · rejected \(vm.recentlyRejected.count)")
+        }
+        .font(.system(.caption2, design: .monospaced))
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(Color(.systemGray6).opacity(0.92))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .padding(.horizontal, 12)
+    }
+
+    private func debugRow(_ key: String, _ value: String, tint: Color? = nil) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Text(key)
+                .foregroundStyle(Color.camusean)
+                .frame(width: 74, alignment: .leading)
+            Text(value)
+                .foregroundStyle(tint ?? .secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .textSelection(.enabled)
         }
     }
 

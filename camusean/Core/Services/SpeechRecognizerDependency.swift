@@ -34,6 +34,9 @@ extension DependencyValues {
 @MainActor
 final class NoopSpeechRecognizer: SpeechRecognizing {
     var partialTranscription: String = ""
+    let backendName = "Noop"
+    let localeSupported: Bool? = nil
+    let lastErrorMessage: String? = nil
     nonisolated init() {}
     func setLocale(_ identifier: String) {}
     func requestPermissions() async -> Bool { false }

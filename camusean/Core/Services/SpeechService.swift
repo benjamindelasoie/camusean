@@ -11,6 +11,12 @@ final class LegacySpeechRecognizer: SpeechRecognizing {
     // Live transcription shown while user is speaking
     var partialTranscription: String = ""
 
+    // Diagnostics surfaced by the session debug overlay. SFSpeechRecognizer supports all
+    // system locales, so `localeSupported` is always true on this backend.
+    let backendName = "Legacy · SFSpeechRecognizer"
+    let localeSupported: Bool? = true
+    private(set) var lastErrorMessage: String?
+
     private var recognizer: SFSpeechRecognizer?
     private var request: SFSpeechAudioBufferRecognitionRequest?
     private var task: SFSpeechRecognitionTask?
@@ -38,11 +44,18 @@ final class LegacySpeechRecognizer: SpeechRecognizing {
     // waits, stops the engine.
     func listenForCandidates() async -> [String] {
         teardown()
+        lastErrorMessage = nil
 
         do { try AudioSessionManager.shared.activateForRecording() }
-        catch { return [] }
+        catch {
+            lastErrorMessage = "audio session: \(error.localizedDescription)"
+            return []
+        }
 
-        guard let recognizer, recognizer.isAvailable else { return [] }
+        guard let recognizer, recognizer.isAvailable else {
+            lastErrorMessage = "recognizer unavailable"
+            return []
+        }
 
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
@@ -74,7 +87,8 @@ final class LegacySpeechRecognizer: SpeechRecognizing {
                             self.continuation = nil
                         }
                     }
-                    if error != nil {
+                    if let error {
+                        self.lastErrorMessage = error.localizedDescription
                         self.silenceTimer?.cancel()
                         self.partialTranscription = ""
                         self.continuation?.resume(returning: [])

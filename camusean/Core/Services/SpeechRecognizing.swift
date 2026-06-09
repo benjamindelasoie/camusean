@@ -18,6 +18,18 @@ protocol SpeechRecognizing: AnyObject, Sendable {
     /// Live transcription shown while the user is still speaking.
     var partialTranscription: String { get }
 
+    // MARK: Diagnostics (read by the on-screen session debug overlay)
+
+    /// Human-readable name of the active backend, e.g. "Dictation · SpeechAnalyzer (iOS 26)".
+    var backendName: String { get }
+
+    /// Whether the current source locale is supported by this backend.
+    /// `nil` until the first `listenForCandidates()` resolves the check.
+    var localeSupported: Bool? { get }
+
+    /// Last recognition/setup error, if any (surfaced in the debug overlay).
+    var lastErrorMessage: String? { get }
+
     /// Set the source-language locale (e.g. "fr-FR") before listening.
     func setLocale(_ identifier: String)
 

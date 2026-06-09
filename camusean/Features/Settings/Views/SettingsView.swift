@@ -4,6 +4,7 @@ struct SettingsView: View {
     @AppStorage("sourceLanguageLocale") private var sourceLanguageLocale = "fr-FR"
     @AppStorage("sourceLanguageName") private var sourceLanguageName = "French"
     @AppStorage("targetLanguageName") private var targetLanguageName = "English"
+    @AppStorage("showSessionDebugOverlay") private var showSessionDebugOverlay = false
 
     @State private var apiKey = ""
     @State private var showAPIKey = false
@@ -17,6 +18,7 @@ struct SettingsView: View {
                 languageSection
                 voiceSection
                 apiKeySection
+                developerSection
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $showVoiceSheet) {
@@ -143,6 +145,20 @@ struct SettingsView: View {
             apiKey = KeychainService.loadAPIKey().map {
                 String(repeating: "•", count: min($0.count, 20))
             } ?? ""
+        }
+    }
+
+    // MARK: - Developer Section
+
+    private var developerSection: some View {
+        Section {
+            Toggle(isOn: $showSessionDebugOverlay) {
+                Label("Session debug overlay", systemImage: "ladybug")
+            }
+        } header: {
+            Text("Developer")
+        } footer: {
+            Text("Shows a live recognition diagnostics panel on the reading screen. Safe to leave off.")
         }
     }
 
