@@ -1,0 +1,7 @@
+{
+  "scripts": {
+    "setup": "git -C \"$CONDUCTOR_ROOT_PATH\" fetch --prune origin && git -C \"$CONDUCTOR_ROOT_PATH\" pull --ff-only || true; open camusean.xcodeproj",
+    "run": "./scripts/conductor-run-device.sh"
+  },
+  "runScriptMode": "nonconcurrent"
+}
