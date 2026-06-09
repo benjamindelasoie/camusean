@@ -1,4 +1,6 @@
 import Foundation
+import Speech
+import AVFoundation
 
 // The app's speech-to-text seam. Two backends implement this contract:
 //   • LegacySpeechRecognizer    — SFSpeechRecognizer (iOS 18–25)
@@ -44,6 +46,25 @@ enum SpeechRecognition {
         } else {
             return LegacySpeechRecognizer()
         }
+    }
+
+    // Request microphone + speech-recognition authorization, shared by both backends.
+    //
+    // MUST stay `nonisolated`. TCC delivers these completion handlers on a background
+    // dispatch queue. If the closures inherited @MainActor isolation (which they would
+    // inside a @MainActor backend), Swift 6 inserts a main-executor assertion that runs
+    // *before* the closure body — and since TCC isn't on the main queue, it trips
+    // `dispatch_assert_queue` → EXC_BREAKPOINT/SIGTRAP (crashed on first "Begin Reading",
+    // iOS 26 build). Defining them in a nonisolated context strips that isolation; resuming
+    // a CheckedContinuation from a background thread is safe and Sendable.
+    nonisolated static func requestMicAndSpeechAuthorization() async -> Bool {
+        let speechAuth = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+            SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0 == .authorized) }
+        }
+        let micAuth = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
+            AVAudioApplication.requestRecordPermission { c.resume(returning: $0) }
+        }
+        return speechAuth && micAuth
     }
 
     // Pure string-level helper shared by both backends. (Moved here from the old

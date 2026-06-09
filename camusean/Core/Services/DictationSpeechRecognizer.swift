@@ -50,13 +50,9 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
     // same Speech authorization the app already asks for so behavior is identical
     // across backends and the Settings copy stays accurate.)
     func requestPermissions() async -> Bool {
-        let speechAuth = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
-            SFSpeechRecognizer.requestAuthorization { c.resume(returning: $0 == .authorized) }
-        }
-        let micAuth = await withCheckedContinuation { (c: CheckedContinuation<Bool, Never>) in
-            AVAudioApplication.requestRecordPermission { c.resume(returning: $0) }
-        }
-        return speechAuth && micAuth
+        // Delegated to a nonisolated helper so the TCC background-queue callbacks don't trip
+        // the Swift 6 main-actor executor assertion (see SpeechRecognition.requestMicAndSpeechAuthorization).
+        await SpeechRecognition.requestMicAndSpeechAuthorization()
     }
 
     // Listens until one complete utterance is detected. Returns up to 3 distinct
@@ -136,18 +132,42 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
             }
 
             // Mic tap: convert each buffer to the analyzer's format and feed the input stream.
-            // Captured as locals (not `self`) so the audio-thread callback touches no actor state.
+            // Installed via a nonisolated helper so the realtime audio-thread callback carries
+            // no @MainActor isolation — otherwise Swift 6 traps it with a main-executor assertion
+            // (EXC_BREAKPOINT) the instant the first buffer arrives off-main. See installMicTap.
             let input = engine.inputNode
             let tapFormat = input.outputFormat(forBus: 0)
-            let converter = self.converter
-            input.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { buffer, _ in
-                guard buffer.frameLength > 0 else { return }
-                guard let converted = try? converter.convertBuffer(buffer, to: format) else { return }
-                inputContinuation.yield(AnalyzerInput(buffer: converted))
-            }
+            installMicTap(
+                on: input,
+                tapFormat: tapFormat,
+                analyzerFormat: format,
+                converter: self.converter,
+                continuation: inputContinuation
+            )
             engine.prepare()
             do { try engine.start() }
             catch { finish(with: []) }
+        }
+    }
+
+    // Installs the AVAudioEngine mic tap. `nonisolated` is load-bearing: AVFoundation invokes
+    // the tap block on its realtime background queue, and a @MainActor-isolated block (which is
+    // what the compiler infers inside this @MainActor class) would assert it's on the main
+    // executor before running — tripping `dispatch_assert_queue` → EXC_BREAKPOINT the moment the
+    // first buffer arrives. Defining the block in this nonisolated method strips that isolation.
+    // The block only touches its passed-in locals (a nonisolated BufferConverter + the Sendable
+    // continuation), never main-actor state.
+    nonisolated private func installMicTap(
+        on input: AVAudioInputNode,
+        tapFormat: AVAudioFormat,
+        analyzerFormat: AVAudioFormat,
+        converter: BufferConverter,
+        continuation: AsyncStream<AnalyzerInput>.Continuation
+    ) {
+        input.installTap(onBus: 0, bufferSize: 1024, format: tapFormat) { buffer, _ in
+            guard buffer.frameLength > 0 else { return }
+            guard let converted = try? converter.convertBuffer(buffer, to: analyzerFormat) else { return }
+            continuation.yield(AnalyzerInput(buffer: converted))
         }
     }
 
@@ -221,8 +241,12 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
 
 // Converts mic buffers into the sample rate/format the analyzer expects.
 // Ported from FluidInference/swift-scribe (the reference iOS 26 SpeechAnalyzer app).
+//
+// `nonisolated` (opting out of the module's MainActor default): this runs on AVFoundation's
+// realtime audio thread from the mic-tap block, never on the main actor. Leaving it
+// MainActor-isolated is what made the tap callback trip a Swift 6 executor assertion.
 @available(iOS 26, *)
-private final class BufferConverter {
+nonisolated private final class BufferConverter {
     enum Error: Swift.Error {
         case failedToCreateConverter
         case failedToCreateConversionBuffer

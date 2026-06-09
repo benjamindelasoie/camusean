@@ -27,17 +27,9 @@ final class LegacySpeechRecognizer: SpeechRecognizing {
     }
 
     func requestPermissions() async -> Bool {
-        let speechAuth = await withCheckedContinuation { continuation in
-            SFSpeechRecognizer.requestAuthorization { status in
-                continuation.resume(returning: status == .authorized)
-            }
-        }
-        let micAuth = await withCheckedContinuation { continuation in
-            AVAudioApplication.requestRecordPermission { granted in
-                continuation.resume(returning: granted)
-            }
-        }
-        return speechAuth && micAuth
+        // Delegated to a nonisolated helper so the TCC background-queue callbacks don't trip
+        // the Swift 6 main-actor executor assertion (see SpeechRecognition.requestMicAndSpeechAuthorization).
+        await SpeechRecognition.requestMicAndSpeechAuthorization()
     }
 
     // Listens until one complete utterance is detected (Apple fires isFinal after ~1s silence).
