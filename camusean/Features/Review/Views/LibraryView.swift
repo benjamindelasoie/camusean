@@ -119,25 +119,68 @@ struct LibraryView: View {
         }
     }
 
+    // MARK: - Grouping by book
+
+    // Once the reader has any book, the Library organizes words under their book (newest book
+    // first, "Free reading" last) — "the words I learned reading L'Étranger". Before any book
+    // exists, it stays a flat list. Search/filter/sort still apply inside each group.
+    private var hasBooks: Bool { allWords.contains { $0.book != nil } }
+
+    private struct BookGroup: Identifiable {
+        let id: String
+        let title: String
+        let words: [Word]
+    }
+
+    private var groupedWords: [BookGroup] {
+        let grouped = Dictionary(grouping: filteredWords) { $0.book }
+        let orderedKeys = grouped.keys.sorted { lhs, rhs in
+            switch (lhs, rhs) {
+            case let (l?, r?): return l.dateAdded > r.dateAdded   // newest book first
+            case (_?, nil): return true                            // real books before "Free reading"
+            case (nil, _?): return false
+            case (nil, nil): return false
+            }
+        }
+        return orderedKeys.map { book in
+            BookGroup(
+                id: book.map { String(describing: $0.persistentModelID) } ?? "free",
+                title: book?.title ?? "Free reading",
+                words: grouped[book] ?? []
+            )
+        }
+    }
+
     // MARK: - List
 
     private var contentList: some View {
         List {
-            ForEach(filteredWords) { word in
-                libraryRow(for: word)
-                    .listRowInsets(.init(top: 12, leading: 20, bottom: 12, trailing: 20))
-                    .contentShape(Rectangle())
-                    .onTapGesture { selectedWord = word }
-                    .swipeActions(edge: .trailing, allowsFullSwipe: true) {
-                        Button(role: .destructive) {
-                            delete(word)
-                        } label: {
-                            Label("Delete", systemImage: "trash")
-                        }
+            if hasBooks {
+                ForEach(groupedWords) { group in
+                    Section(group.title) {
+                        ForEach(group.words) { word in rowView(for: word) }
                     }
+                }
+            } else {
+                ForEach(filteredWords) { word in rowView(for: word) }
             }
         }
         .listStyle(.plain)
+    }
+
+    @ViewBuilder
+    private func rowView(for word: Word) -> some View {
+        libraryRow(for: word)
+            .listRowInsets(.init(top: 12, leading: 20, bottom: 12, trailing: 20))
+            .contentShape(Rectangle())
+            .onTapGesture { selectedWord = word }
+            .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                Button(role: .destructive) {
+                    delete(word)
+                } label: {
+                    Label("Delete", systemImage: "trash")
+                }
+            }
     }
 
     private func delete(_ word: Word) {
@@ -322,14 +365,26 @@ struct LibraryView: View {
 
             Spacer()
 
-            if let nrd = word.nextReviewDate {
-                HStack(spacing: 6) {
-                    Image(systemName: "calendar")
-                        .font(.system(size: 11))
-                        .foregroundStyle(.tertiary)
-                    Text("Next review \(relativeDate(nrd))")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            VStack(alignment: .leading, spacing: 8) {
+                if let bookTitle = word.book?.title {
+                    HStack(spacing: 6) {
+                        Image(systemName: "book.closed")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                        Text("From \(bookTitle)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                if let nrd = word.nextReviewDate {
+                    HStack(spacing: 6) {
+                        Image(systemName: "calendar")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                        Text("Next review \(relativeDate(nrd))")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
             }
         }
@@ -368,5 +423,5 @@ struct LibraryView: View {
     NavigationStack {
         LibraryView()
     }
-    .modelContainer(for: Word.self, inMemory: true)
+    .modelContainer(for: [Word.self, Book.self], inMemory: true)
 }
