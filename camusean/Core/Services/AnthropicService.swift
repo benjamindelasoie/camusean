@@ -3,6 +3,22 @@ import Foundation
 struct LookupResult {
     let definition: String
     let exampleSentence: String
+    /// The word Claude believes the reader actually intended, when the speech transcription
+    /// was likely a mishearing. `nil` means "no correction" — the transcription was kept as-is
+    /// (either already a valid word, or the model returned the same/blank value).
+    let correctedWord: String?
+}
+
+// Decodable shape of the model's JSON reply. `correctedWord` is optional so older/edge
+// responses that omit it still decode; it is normalized to `LookupResult.correctedWord` by
+// `AnthropicService.parseLookupResult`.
+// `nonisolated` so its synthesized `Decodable` conformance is usable from the nonisolated
+// `parseLookupResult` (the module defaults types to @MainActor, which would isolate the
+// conformance and break decoding off the main actor).
+private nonisolated struct LookupJSON: Decodable {
+    let definition: String
+    let exampleSentence: String
+    let correctedWord: String?
 }
 
 actor AnthropicService {
@@ -12,14 +28,38 @@ actor AnthropicService {
     private var dailyCount = 0
     private var lastResetDate = Calendar.current.startOfDay(for: Date())
 
-    func lookup(word: String, sourceLanguage: String, targetLanguage: String, apiKey: String) async throws -> LookupResult {
+    func lookup(
+        word: String,
+        sourceLanguage: String,
+        targetLanguage: String,
+        recentlyRejected: [String] = [],
+        apiKey: String
+    ) async throws -> LookupResult {
         resetDailyCountIfNeeded()
         guard dailyCount < dailyCap else { throw LookupError.dailyCapReached }
 
+        // Negative context: words the reader already rejected this session. Biases Claude away
+        // from re-deriving the same wrong interpretation of a repeated mishearing. Strip quotes
+        // and newlines first so a stray transcription character can't malform the prompt.
+        let sanitizedRejections = recentlyRejected
+            .map { $0.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let rejectedClause = sanitizedRejections.isEmpty ? "" : "\n- Never choose any of these already-rejected words: " +
+            sanitizedRejections.map { "\"\($0)\"" }.joined(separator: ", ") + "."
+
+        // The transcription is a *hypothesis*, not ground truth: on the iOS 26 DictationTranscriber
+        // path only one candidate comes back, and the reader is non-native, so phonetic misfires are
+        // systematic. Let Claude correct the word before defining it (the cheapest place to do it —
+        // same single call, no extra latency). "Keep it if already valid" curbs over-correction.
         let prompt = """
-        Define the \(sourceLanguage) word "\(word)" in \(targetLanguage).
-        Reply with ONLY a JSON object, no markdown, no extra text:
-        {"definition": "short definition here", "exampleSentence": "example using the word"}
+        Someone reading aloud in \(sourceLanguage) (not a native \(sourceLanguage) speaker) spoke a word that on-device speech recognition transcribed as "\(word)". The transcription may be phonetically inaccurate.
+
+        Decide the most likely intended \(sourceLanguage) word:
+        - If "\(word)" is already a valid \(sourceLanguage) word, keep it exactly.
+        - Otherwise infer the most likely intended \(sourceLanguage) word from the (possibly misheard) transcription.\(rejectedClause)
+
+        Then define that intended word in \(targetLanguage). Reply with ONLY a JSON object, no markdown, no extra text. Replace each angle-bracket placeholder with a real value:
+        {"correctedWord": "<the intended \(sourceLanguage) word>", "definition": "<short definition>", "exampleSentence": "<example sentence using the word>"}
         """
 
         var request = URLRequest(url: endpoint)
@@ -59,20 +99,43 @@ actor AnthropicService {
 
         print("[Anthropic] model text: \(text)")
 
-        // Claude sometimes wraps JSON in markdown fences — strip them and find the object
-        let extracted = extractJSON(from: text)
-        guard
-            let jsonData = extracted.data(using: .utf8),
-            let obj = try? JSONSerialization.jsonObject(with: jsonData) as? [String: String],
-            let definition = obj["definition"],
-            let exampleSentence = obj["exampleSentence"]
-        else { throw LookupError.malformedResponse("couldn't parse JSON: \(extracted)") }
-
+        let result = try Self.parseLookupResult(from: text, original: word)
         dailyCount += 1
-        return LookupResult(definition: definition, exampleSentence: exampleSentence)
+        return result
     }
 
-    private func extractJSON(from text: String) -> String {
+    // Pure, `nonisolated static` so it's unit-testable without a network round-trip. Strips any
+    // markdown fences, decodes the JSON object, and normalizes `correctedWord` (blank or a
+    // case-insensitive match of the original transcription collapses to `nil` = no correction).
+    nonisolated static func parseLookupResult(from text: String, original: String) throws -> LookupResult {
+        let extracted = extractJSON(from: text)
+        guard let jsonData = extracted.data(using: .utf8) else {
+            throw LookupError.malformedResponse("non-utf8 response: \(extracted)")
+        }
+        let decoded: LookupJSON
+        do {
+            decoded = try JSONDecoder().decode(LookupJSON.self, from: jsonData)
+        } catch {
+            throw LookupError.malformedResponse("couldn't decode JSON: \(extracted)")
+        }
+        return LookupResult(
+            definition: decoded.definition,
+            exampleSentence: decoded.exampleSentence,
+            correctedWord: normalizeCorrection(decoded.correctedWord, original: original)
+        )
+    }
+
+    // A correction only counts when it's non-blank AND actually differs from the transcription.
+    nonisolated static func normalizeCorrection(_ raw: String?, original: String) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let originalTrimmed = original.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.caseInsensitiveCompare(originalTrimmed) == .orderedSame { return nil }
+        return trimmed
+    }
+
+    nonisolated static func extractJSON(from text: String) -> String {
         // Strip markdown code fences if present
         var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.hasPrefix("```") {

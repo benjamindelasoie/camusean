@@ -46,6 +46,12 @@ final class SessionViewModel {
     var lookupCancelled: Bool = false
     var recentlyRejected: [(transcription: String, at: Date)] = []
 
+    // The raw ASR transcription for the in-flight lookup, tracked separately from `currentWord`
+    // because correction rewrites `currentWord.word` to the *intended* word. On reject we must
+    // blocklist what was actually misheard (the transcription), not the corrected word, or the
+    // biased-retry filter and the negative-context prompt key off the wrong token.
+    var currentOriginalTranscription: String?
+
     let rejectionWindowSeconds: TimeInterval = 10
     let rejectionCap: Int = 3
 
@@ -62,6 +68,15 @@ final class SessionViewModel {
     var sourceLocale: String { UserDefaults.standard.string(forKey: "sourceLanguageLocale") ?? "fr-FR" }
     var sourceName: String { UserDefaults.standard.string(forKey: "sourceLanguageName") ?? "French" }
     var targetName: String { UserDefaults.standard.string(forKey: "targetLanguageName") ?? "English" }
+
+    // Kill-switch for LLM word correction (Settings → Developer). Defaults ON. When OFF the
+    // lookup still logs what Claude *would* have corrected to (so the false-correction rate is
+    // observable) but applies nothing — the design's "log without applying" safe-rollout mode.
+    var wordCorrectionEnabled: Bool {
+        UserDefaults.standard.object(forKey: "wordCorrectionEnabled") == nil
+            ? true
+            : UserDefaults.standard.bool(forKey: "wordCorrectionEnabled")
+    }
 
     func startSession() async {
         permissionDenied = false
@@ -120,9 +135,11 @@ final class SessionViewModel {
     // remember the rejected transcription so the next ASR pass biases away from it,
     // and return to listening.
     func cancelCurrentLookup() {
-        // Capture the transcription BEFORE mutating state. Prefer currentWord (set after
-        // saveWord); fall back to the phase enum (cancel fired before saveWord ran).
-        let transcription: String? = {
+        // Capture the transcription BEFORE mutating state. Prefer the raw ASR transcription
+        // (`currentOriginalTranscription`) so we blocklist what was actually misheard, not the
+        // corrected word that replaced it in `currentWord`. Fall back to `currentWord`/the phase
+        // enum for cancels that predate the transcription being set (and for the test seams).
+        let transcription: String? = currentOriginalTranscription ?? {
             if let w = currentWord { return w.word }
             if case .processing(let p) = phase { return p }
             if case .result(let r, _) = phase { return r }
@@ -137,6 +154,7 @@ final class SessionViewModel {
             try? modelContext?.save()
         }
         currentWord = nil
+        currentOriginalTranscription = nil
 
         if let t = transcription {
             recentlyRejected.append((transcription: t, at: Date()))
@@ -206,14 +224,20 @@ final class SessionViewModel {
             return
         }
 
+        // Track the raw transcription only once we're committed to the network call, so a
+        // failed precondition (no API key) can't leave a stale value for a later cancel.
+        currentOriginalTranscription = word
+
         // Kick off the definition fetch and echo the word back concurrently. The user just
         // said this word, so we can pronounce the "correct" native version while Claude is
         // still generating the definition — the echo hides the network round-trip instead of
-        // stacking on top of it.
+        // stacking on top of it. We pass the rejected mishearings as negative context so a
+        // repeated misfire biases Claude away from the same wrong interpretation.
         async let pending = anthropicService.lookup(
             word: word,
             sourceLanguage: sourceName,
             targetLanguage: targetName,
+            recentlyRejected: recentlyRejected.map(\.transcription),
             apiKey: apiKey
         )
 
@@ -228,9 +252,27 @@ final class SessionViewModel {
             let result = try await pending
             if lookupCancelled { return }
 
-            currentWord = saveWord(word: word, definition: result.definition, example: result.exampleSentence)
+            // The transcription may have been a mishearing; `result.correctedWord` is the word
+            // Claude believes was intended (nil = no correction). Apply it only when the
+            // kill-switch is on; either way, log the would-be correction so the false-correction
+            // rate is observable on-device before we trust it (the design's safe-rollout).
+            let appliedCorrection = wordCorrectionEnabled ? result.correctedWord : nil
+            let resolvedWord = appliedCorrection ?? word
+            if let intended = result.correctedWord {
+                print("[correction] heard=\"\(word)\" intended=\"\(intended)\" applied=\(wordCorrectionEnabled)")
+            }
+
+            currentWord = saveWord(word: resolvedWord, definition: result.definition, example: result.exampleSentence)
             lookupCount += 1
-            phase = .result(word, result.definition)
+            phase = .result(resolvedWord, result.definition)
+
+            // If we corrected the word, the concurrent echo already spoke the *misheard* word.
+            // Voice the authoritative corrected word (in the source locale) before the English
+            // definition so the reader hears the right pronunciation — "<corrected> means <def>".
+            if let corrected = appliedCorrection {
+                await tts.speak(corrected, language: sourceLocale)
+                if lookupCancelled { return }
+            }
 
             await tts.speak(result.definition, language: "en-US")
             if lookupCancelled { return }
@@ -240,10 +282,12 @@ final class SessionViewModel {
             // Successful uncancelled completion: clear in-flight state and the rejection
             // blocklist (user accepted the lookup, so prior rejections are no longer relevant).
             currentWord = nil
+            currentOriginalTranscription = nil
             recentlyRejected = []
         } catch {
             if lookupCancelled { return }
             print("[lookup] error: \(error)")
+            // On failure there is no correction — persist the raw transcription unchanged.
             currentWord = saveWord(word: word, definition: "", example: "")
             phase = .error(Self.friendlyLookupMessage(for: error))
             try? AudioSessionManager.shared.activateForPlayback()
@@ -251,6 +295,7 @@ final class SessionViewModel {
             if lookupCancelled { return }
             try? AudioSessionManager.shared.activateForRecording()
             currentWord = nil
+            currentOriginalTranscription = nil
         }
     }
 

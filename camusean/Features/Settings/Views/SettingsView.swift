@@ -5,6 +5,7 @@ struct SettingsView: View {
     @AppStorage("sourceLanguageName") private var sourceLanguageName = "French"
     @AppStorage("targetLanguageName") private var targetLanguageName = "English"
     @AppStorage("showSessionDebugOverlay") private var showSessionDebugOverlay = false
+    @AppStorage("wordCorrectionEnabled") private var wordCorrectionEnabled = true
 
     @State private var apiKey = ""
     @State private var showAPIKey = false
@@ -155,10 +156,13 @@ struct SettingsView: View {
             Toggle(isOn: $showSessionDebugOverlay) {
                 Label("Session debug overlay", systemImage: "ladybug")
             }
+            Toggle(isOn: $wordCorrectionEnabled) {
+                Label("Correct misheard words", systemImage: "wand.and.sparkles")
+            }
         } header: {
             Text("Developer")
         } footer: {
-            Text("Shows a live recognition diagnostics panel on the reading screen. Safe to leave off.")
+            Text("Session debug overlay shows a live recognition diagnostics panel on the reading screen. Correct misheard words lets the dictionary fix likely speech-recognition misfires before defining; turn off to keep the exact transcription (misfires are still logged either way).")
         }
     }
 
