@@ -27,7 +27,7 @@ import SwiftData
         let container = try makeV2Container()
         let context = ModelContext(container)
 
-        let row = Word(
+        let row = CamuseanSchemaV2.Word(
             word: "bonjour",
             definition: "hello",
             exampleSentence: "Bonjour, comment ça va?",
@@ -44,7 +44,7 @@ import SwiftData
         let migrationNow = Date(timeIntervalSince1970: 1_800_000_000)
         try CamuseanMigrationPlan.applyV1toV2Mapping(in: context, now: migrationNow)
 
-        let result = try context.fetch(FetchDescriptor<Word>())
+        let result = try context.fetch(FetchDescriptor<CamuseanSchemaV2.Word>())
         try #require(result.count == 1)
         let migrated = result[0]
         #expect(migrated.word == "bonjour")
@@ -61,7 +61,7 @@ import SwiftData
         let container = try makeV2Container()
         let context = ModelContext(container)
 
-        let row = Word(
+        let row = CamuseanSchemaV2.Word(
             word: "flâner",
             sourceLanguage: "French",
             targetLanguage: "English"
@@ -72,7 +72,7 @@ import SwiftData
 
         try CamuseanMigrationPlan.applyV1toV2Mapping(in: context, now: Date())
 
-        let result = try context.fetch(FetchDescriptor<Word>())
+        let result = try context.fetch(FetchDescriptor<CamuseanSchemaV2.Word>())
         try #require(result.count == 1)
         let migrated = result[0]
         #expect(migrated.word == "flâner")
@@ -90,7 +90,7 @@ import SwiftData
 
         let frozenTimestamp = Date(timeIntervalSince1970: 1_700_000_000)
 
-        let row = Word(
+        let row = CamuseanSchemaV2.Word(
             word: "désinvolture",
             definition: "casualness, nonchalance",
             exampleSentence: "Il répondit avec désinvolture.",
@@ -104,7 +104,7 @@ import SwiftData
 
         try CamuseanMigrationPlan.applyV1toV2Mapping(in: context, now: Date())
 
-        let result = try context.fetch(FetchDescriptor<Word>())
+        let result = try context.fetch(FetchDescriptor<CamuseanSchemaV2.Word>())
         try #require(result.count == 1)
         let migrated = result[0]
         #expect(migrated.word == "désinvolture")

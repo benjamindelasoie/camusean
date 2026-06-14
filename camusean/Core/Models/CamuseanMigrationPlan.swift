@@ -36,12 +36,23 @@ enum CamuseanSchemaV1: VersionedSchema {
 
 enum CamuseanMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [CamuseanSchemaV1.self, CamuseanSchemaV2.self]
+        [CamuseanSchemaV1.self, CamuseanSchemaV2.self, CamuseanSchemaV3.self]
     }
 
     static var stages: [MigrationStage] {
-        [migrateV1toV2]
+        [migrateV1toV2, migrateV2toV3]
     }
+
+    // V2 -> V3: purely additive (new optional `Word.book`/`Word.originalTranscription` and the new
+    // `Book` entity), so this is a lightweight stage with no mapping closure. Do NOT model it on
+    // the custom V1 -> V2 stage above — there is no per-row logic to run, and a custom stage here
+    // would be needless risk. Registering it (and adding V3 to `schemas`) is mandatory: without
+    // the stage SwiftData sees two schema versions with no path between them and throws at
+    // container init.
+    static let migrateV2toV3 = MigrationStage.lightweight(
+        fromVersion: CamuseanSchemaV2.self,
+        toVersion: CamuseanSchemaV3.self
+    )
 
     // V1 -> V2: existing rows where isKnown==true get parked on a future schedule so they don't
     // resurface in Review. Rows where isKnown==false get nextReviewDate=nil and reappear as due,

@@ -9,7 +9,7 @@ import SwiftData
     // Build an in-memory container so we can exercise modelContext.delete without driving
     // a real ModelContainer file. Each test gets its own container.
     private func makeContext() -> ModelContext {
-        let schema = Schema(versionedSchema: CamuseanSchemaV2.self)
+        let schema = Schema(versionedSchema: CamuseanSchemaV3.self)
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try! ModelContainer(for: schema, configurations: [config])
         return ModelContext(container)

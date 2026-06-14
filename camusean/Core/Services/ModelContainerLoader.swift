@@ -4,7 +4,7 @@ import SwiftData
 // Loads the app's ModelContainer and exposes a destructive reset path so the
 // UI can recover from a corrupt store instead of crashing on launch.
 enum ModelContainerLoader {
-    private static let schema = Schema(versionedSchema: CamuseanSchemaV2.self)
+    private static let schema = Schema(versionedSchema: CamuseanSchemaV3.self)
 
     static let configuration = ModelConfiguration(
         schema: schema,
