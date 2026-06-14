@@ -3,7 +3,9 @@ import Foundation
 // Catalog of languages the user can read in. The target/definition language is always
 // English (see SessionViewModel.targetName), so English appears here only as a *reading*
 // option — choosing it gives monolingual English definitions for hard words.
-struct ReadingLanguage: Identifiable, Hashable {
+// `nonisolated`: a pure immutable catalog — no main-actor state, so it stays usable from
+// nonisolated network/parsing code (e.g. OpenLibraryService.marcToLocale) as well as the UI.
+nonisolated struct ReadingLanguage: Identifiable, Hashable {
     let name: String
     let locale: String      // BCP-47 identifier for SFSpeechRecognizer + TTS, e.g. "fr-FR"
     let flag: String
