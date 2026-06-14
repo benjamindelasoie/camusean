@@ -53,7 +53,25 @@ enum OpenLibraryService {
         if let http = response as? HTTPURLResponse, http.statusCode == 404 {
             throw OpenLibraryError.notFound
         }
-        return try parseEdition(from: data, isbn: clean)
+        var meta = try parseEdition(from: data, isbn: clean)
+        // Many editions have a null by_statement but list an author key. Resolve the name with one
+        // extra hop so the reader doesn't have to type it.
+        if meta.author.isEmpty,
+           let key = (try? JSONDecoder().decode(OLEdition.self, from: data))?.authors?.first?.key {
+            meta.author = await fetchAuthorName(key, session: session) ?? ""
+        }
+        return meta
+    }
+
+    // Resolves "/authors/OL…A" → display name. Best-effort: any failure leaves the author blank
+    // (the reader can type it on the confirm card).
+    nonisolated static func fetchAuthorName(_ key: String, session: URLSession = .shared) async -> String? {
+        guard let url = URL(string: "https://openlibrary.org\(key).json") else { return nil }
+        guard let (data, _) = try? await session.data(from: url),
+              let author = try? JSONDecoder().decode(OLAuthor.self, from: data),
+              let name = author.name?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !name.isEmpty else { return nil }
+        return name
     }
 
     // Strip everything but digits (and a trailing X, valid in ISBN-10 check digits). Handles
@@ -73,10 +91,11 @@ enum OpenLibraryService {
             throw OpenLibraryError.decoding
         }
 
-        guard let title = edition.title?.trimmingCharacters(in: .whitespacesAndNewlines), !title.isEmpty else {
+        guard let rawTitle = edition.title?.trimmingCharacters(in: .whitespacesAndNewlines), !rawTitle.isEmpty else {
             // A record with no title is unusable — treat like a miss so the caller offers manual entry.
             throw OpenLibraryError.notFound
         }
+        let title = cleanedTitle(rawTitle)
 
         let marc = edition.languages?.first?.key.replacingOccurrences(of: "/languages/", with: "")
         let locale = marc.flatMap(marcToLocale)
@@ -99,6 +118,30 @@ enum OpenLibraryService {
             openLibraryEditionID: editionID,
             openLibraryWorkID: workID
         )
+    }
+
+    // Reduce Open Library's full cataloguing title to the main title a reader would actually say.
+    // Editions cram the subtitle and series into one field, e.g.
+    //   "Le Mythe De Sisyphe Essai Sur Labsurde (Collection Folio / Essais)"
+    //   "Le mythe de Sisyphe, essai sur l'absurde"
+    // Strategy: drop trailing parenthetical/bracketed series info, then cut at the first subtitle
+    // separator (":" most reliable, then a dash, then a comma — least reliable but common in French
+    // editions). Aggressive on purpose: the reader wants the short title, and the confirm card is
+    // editable for the rare over-trim.
+    nonisolated static func cleanedTitle(_ raw: String) -> String {
+        var t = raw
+        if let r = t.range(of: #"\s*[\(\[].*$"#, options: .regularExpression) {
+            t.removeSubrange(r)
+        }
+        for separator in [": ", ":", " — ", " - ", ", ", ","] {
+            if let r = t.range(of: separator) {
+                t = String(t[..<r.lowerBound])
+                break
+            }
+        }
+        let cleaned = t.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Never return empty from over-trimming — fall back to the original trimmed title.
+        return cleaned.isEmpty ? raw.trimmingCharacters(in: .whitespacesAndNewlines) : cleaned
     }
 
     // MARC bibliographic language code -> app reading locale. Region ("fr-FR") comes from our own
@@ -127,6 +170,7 @@ private nonisolated struct OLEdition: Decodable {
     let title: String?
     let key: String?
     let by_statement: String?
+    let authors: [OLKeyRef]?
     let languages: [OLKeyRef]?
     let works: [OLKeyRef]?
     let covers: [Int]?
@@ -134,6 +178,10 @@ private nonisolated struct OLEdition: Decodable {
 
 private nonisolated struct OLKeyRef: Decodable {
     let key: String
+}
+
+private nonisolated struct OLAuthor: Decodable {
+    let name: String?
 }
 
 // swift-dependencies seam. A closure client (not a protocol) because this is a stateless,

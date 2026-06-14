@@ -106,6 +106,36 @@ import Testing
         #expect(OpenLibraryService.marcToLocale("") == nil)
     }
 
+    // MARK: cleanedTitle — reduce OL's catalogue title to the everyday main title
+
+    @Test func cleanedTitleStripsCommaSubtitle() {
+        #expect(OpenLibraryService.cleanedTitle("Le mythe de Sisyphe, essai sur l'absurde") == "Le mythe de Sisyphe")
+    }
+
+    @Test func cleanedTitleStripsColonSubtitle() {
+        #expect(OpenLibraryService.cleanedTitle("Crime and Punishment: A Novel") == "Crime and Punishment")
+    }
+
+    @Test func cleanedTitleStripsSeriesParenthetical() {
+        #expect(OpenLibraryService.cleanedTitle("Nineteen Eighty-Four (Signet Classics)") == "Nineteen Eighty-Four")
+    }
+
+    @Test func cleanedTitleStripsDashSubtitle() {
+        #expect(OpenLibraryService.cleanedTitle("Madame Bovary - Mœurs de province") == "Madame Bovary")
+    }
+
+    @Test func cleanedTitleLeavesPlainTitleUntouched() {
+        #expect(OpenLibraryService.cleanedTitle("L'Étranger") == "L'Étranger")
+        #expect(OpenLibraryService.cleanedTitle("Cien años de soledad") == "Cien años de soledad")
+        // A hyphen inside a word (no surrounding spaces) is not a subtitle separator.
+        #expect(OpenLibraryService.cleanedTitle("Nineteen Eighty-Four") == "Nineteen Eighty-Four")
+    }
+
+    @Test func cleanedTitleNeverReturnsEmpty() {
+        // Pathological "all subtitle" → fall back to the original rather than empty.
+        #expect(OpenLibraryService.cleanedTitle(": only subtitle") == ": only subtitle")
+    }
+
     @Test func normalizedISBNStripsNonDigits() {
         #expect(OpenLibraryService.normalizedISBN("978-2-07-036002-4") == "9782070360024")
         #expect(OpenLibraryService.normalizedISBN("  0451524934 ") == "0451524934")

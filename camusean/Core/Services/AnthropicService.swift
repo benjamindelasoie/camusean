@@ -48,27 +48,30 @@ actor AnthropicService {
         let rejectedClause = sanitizedRejections.isEmpty ? "" : "\n- Never choose any of these already-rejected words: " +
             sanitizedRejections.map { "\"\($0)\"" }.joined(separator: ", ") + "."
 
-        // Book context (when the session is tied to a book): helps Claude pick the sense that fits
-        // the work being read. Sanitized so the title/author can't malform the prompt.
+        // Book context (when the session is tied to a book) disambiguates the *sense* of the word —
+        // it must NEVER replace a valid word with a thematically-related one (the "suicide" →
+        // "Sisyphe" failure). So it is applied only at the define step, after the word is decided.
         let bookClause: String = {
             guard let raw = bookContext?.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines),
                   !raw.isEmpty else { return "" }
-            return " The reader is currently reading \"\(raw)\" — prefer the sense that fits that work."
+            return " The reader is reading \"\(raw)\"; use that ONLY to pick the most fitting sense — never to change which word is defined."
         }()
 
         // The transcription is a *hypothesis*, not ground truth: on the iOS 26 DictationTranscriber
         // path only one candidate comes back, and the reader is non-native, so phonetic misfires are
-        // systematic. Let Claude correct the word before defining it (the cheapest place to do it —
-        // same single call, no extra latency). "Keep it if already valid" curbs over-correction.
+        // systematic. Let Claude correct the word before defining it (same single call, no extra
+        // latency). The keep-if-valid guard is deliberately strict so a valid word is never swapped
+        // for a book-themed one; corrections must be driven by sound, not topic. The reader may also
+        // speak a short phrase (e.g. "mal de l'esprit"), so accept an expression, not just one word.
         let prompt = """
-        Someone reading aloud in \(sourceLanguage) (not a native \(sourceLanguage) speaker) spoke a word that on-device speech recognition transcribed as "\(word)". The transcription may be phonetically inaccurate.\(bookClause)
+        Someone reading aloud in \(sourceLanguage) (not a native \(sourceLanguage) speaker) spoke a word or short phrase that on-device speech recognition transcribed as "\(word)". The transcription may be phonetically inaccurate.
 
-        Decide the most likely intended \(sourceLanguage) word:
-        - If "\(word)" is already a valid \(sourceLanguage) word, keep it exactly.
-        - Otherwise infer the most likely intended \(sourceLanguage) word from the (possibly misheard) transcription.\(rejectedClause)
+        Decide the most likely intended \(sourceLanguage) word or expression:
+        - If "\(word)" is already a valid \(sourceLanguage) word or expression, keep it EXACTLY — even if a different word would fit the book's theme better. Only change it to fix a clear phonetic mishearing.
+        - Otherwise infer the most likely intended \(sourceLanguage) word or expression that SOUNDS like the transcription — not merely one related to the book.\(rejectedClause)
 
-        Then define that intended word in \(targetLanguage). Reply with ONLY a JSON object, no markdown, no extra text. Replace each angle-bracket placeholder with a real value:
-        {"correctedWord": "<the intended \(sourceLanguage) word>", "definition": "<short definition>", "exampleSentence": "<example sentence using the word>"}
+        Then define it in \(targetLanguage).\(bookClause) Reply with ONLY a JSON object, no markdown, no extra text. Replace each angle-bracket placeholder with a real value:
+        {"correctedWord": "<the intended \(sourceLanguage) word or expression>", "definition": "<short definition>", "exampleSentence": "<example sentence>"}
         """
 
         var request = URLRequest(url: endpoint)

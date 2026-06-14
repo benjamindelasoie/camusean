@@ -457,6 +457,9 @@ struct ReadingSessionView: View {
                     Text(word)
                         .font(.system(size: 40, weight: .bold, design: .serif))
                         .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.5)
+                        .padding(.horizontal, 8)
                     DotsView()
                 }
 
@@ -465,6 +468,9 @@ struct ReadingSessionView: View {
                     Text(word)
                         .font(.system(size: 40, weight: .bold, design: .serif))
                         .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.5)
+                        .padding(.horizontal, 8)
                     Rectangle()
                         .fill(Color.camusean.opacity(0.45))
                         .frame(width: 30, height: 1.5)
