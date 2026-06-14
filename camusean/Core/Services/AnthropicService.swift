@@ -32,6 +32,7 @@ actor AnthropicService {
         word: String,
         sourceLanguage: String,
         targetLanguage: String,
+        bookContext: String? = nil,
         recentlyRejected: [String] = [],
         apiKey: String
     ) async throws -> LookupResult {
@@ -47,12 +48,20 @@ actor AnthropicService {
         let rejectedClause = sanitizedRejections.isEmpty ? "" : "\n- Never choose any of these already-rejected words: " +
             sanitizedRejections.map { "\"\($0)\"" }.joined(separator: ", ") + "."
 
+        // Book context (when the session is tied to a book): helps Claude pick the sense that fits
+        // the work being read. Sanitized so the title/author can't malform the prompt.
+        let bookClause: String = {
+            guard let raw = bookContext?.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines),
+                  !raw.isEmpty else { return "" }
+            return " The reader is currently reading \"\(raw)\" — prefer the sense that fits that work."
+        }()
+
         // The transcription is a *hypothesis*, not ground truth: on the iOS 26 DictationTranscriber
         // path only one candidate comes back, and the reader is non-native, so phonetic misfires are
         // systematic. Let Claude correct the word before defining it (the cheapest place to do it —
         // same single call, no extra latency). "Keep it if already valid" curbs over-correction.
         let prompt = """
-        Someone reading aloud in \(sourceLanguage) (not a native \(sourceLanguage) speaker) spoke a word that on-device speech recognition transcribed as "\(word)". The transcription may be phonetically inaccurate.
+        Someone reading aloud in \(sourceLanguage) (not a native \(sourceLanguage) speaker) spoke a word that on-device speech recognition transcribed as "\(word)". The transcription may be phonetically inaccurate.\(bookClause)
 
         Decide the most likely intended \(sourceLanguage) word:
         - If "\(word)" is already a valid \(sourceLanguage) word, keep it exactly.

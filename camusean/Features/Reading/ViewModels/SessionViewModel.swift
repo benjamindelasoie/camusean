@@ -65,9 +65,31 @@ final class SessionViewModel {
     private var listeningTask: Task<Void, Never>?
     var modelContext: ModelContext?
 
-    var sourceLocale: String { UserDefaults.standard.string(forKey: "sourceLanguageLocale") ?? "fr-FR" }
-    var sourceName: String { UserDefaults.standard.string(forKey: "sourceLanguageName") ?? "French" }
+    // The book this session is reading, or nil for a "free" session. Set on the start screen
+    // before startSession(). When set (and it carries a language), it overrides the global Settings
+    // reading language for the session, its title/author sharpen the lookup prompt, and every saved
+    // word is tagged to it.
+    var activeBook: Book?
+
+    var sourceLocale: String {
+        if let lang = activeBook?.language, !lang.isEmpty { return lang }
+        return UserDefaults.standard.string(forKey: "sourceLanguageLocale") ?? "fr-FR"
+    }
+    var sourceName: String {
+        if let lang = activeBook?.language, !lang.isEmpty { return ReadingLanguage.named(locale: lang).name }
+        return UserDefaults.standard.string(forKey: "sourceLanguageName") ?? "French"
+    }
     var targetName: String { UserDefaults.standard.string(forKey: "targetLanguageName") ?? "English" }
+
+    // Prompt context: what the reader is currently reading, e.g. "L'Étranger by Albert Camus".
+    // nil for a free session. Helps Claude disambiguate a word's sense within the book.
+    private var bookContext: String? {
+        guard let book = activeBook else { return nil }
+        let title = book.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+        let author = book.author.trimmingCharacters(in: .whitespacesAndNewlines)
+        return author.isEmpty ? title : "\(title) by \(author)"
+    }
 
     // Kill-switch for LLM word correction (Settings → Developer). Defaults ON. When OFF the
     // lookup still logs what Claude *would* have corrected to (so the false-correction rate is
@@ -237,6 +259,7 @@ final class SessionViewModel {
             word: word,
             sourceLanguage: sourceName,
             targetLanguage: targetName,
+            bookContext: bookContext,
             recentlyRejected: recentlyRejected.map(\.transcription),
             apiKey: apiKey
         )
@@ -319,7 +342,8 @@ final class SessionViewModel {
             definition: definition,
             exampleSentence: example,
             sourceLanguage: sourceName,
-            targetLanguage: targetName
+            targetLanguage: targetName,
+            book: activeBook
         )
         context.insert(entry)
         try? context.save()

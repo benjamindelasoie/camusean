@@ -10,6 +10,13 @@ struct ReadingSessionView: View {
     // All words; used only to compute the weekly "learned" count for the progress strip.
     @Query private var allWords: [Word]
 
+    // Books, newest first — the start-screen selector defaults to the most recent (the book of
+    // the previous session). nil selectedBook = a free session.
+    @Query(sort: \Book.dateAdded, order: .reverse) private var books: [Book]
+    @State private var selectedBook: Book?
+    @State private var didDefaultBook = false
+    @State private var showAddBook = false
+
     @State private var showVoiceOnboarding = false
 
     // Runtime-toggled (Settings → Developer) live recognition diagnostics panel.
@@ -29,6 +36,7 @@ struct ReadingSessionView: View {
     private enum ActiveSheet: Identifiable {
         case summary
         case voiceOnboarding
+        case addBook
         var id: Self { self }
     }
 
@@ -40,12 +48,14 @@ struct ReadingSessionView: View {
             get: {
                 if vm.showSummary { return .summary }
                 if showVoiceOnboarding { return .voiceOnboarding }
+                if showAddBook { return .addBook }
                 return nil
             },
             set: { newValue in
                 if newValue == nil {
                     vm.showSummary = false
                     showVoiceOnboarding = false
+                    showAddBook = false
                 }
             }
         )
@@ -81,14 +91,33 @@ struct ReadingSessionView: View {
                     UserDefaults.standard.set(true, forKey: Self.voicePromptShownKey)
                     showVoiceOnboarding = false
                 }
+            case .addBook:
+                AddBookView { book in
+                    selectedBook = book   // newly added book becomes the active reading book
+                    showAddBook = false
+                }
             }
         }
         .onAppear {
             vm.modelContext = modelContext
+            // Default the session to the most recent book once (don't override a free choice the
+            // reader makes, and don't re-default on every tab return).
+            if !didDefaultBook {
+                selectedBook = books.first
+                didDefaultBook = true
+            }
             evaluateVoiceOnboarding()
             #if DEBUG
             maybeRunQAInjection()
             #endif
+        }
+        // If the selected book disappears from the store (e.g. deleted from a future Library
+        // manager), drop the stale reference so we never start a session or tag a word against a
+        // deleted book, and the selector can't show a phantom title.
+        .onChange(of: books.map(\.persistentModelID)) { _, ids in
+            if let selected = selectedBook, !ids.contains(selected.persistentModelID) {
+                selectedBook = nil
+            }
         }
     }
 
@@ -159,10 +188,49 @@ struct ReadingSessionView: View {
             Spacer().frame(height: 36)
             heroText
             Spacer()
+            bookSelector
+            Spacer().frame(height: 18)
             startCTA
         }
         .padding(.horizontal, 36)
         .padding(.bottom, 52)
+    }
+
+    // Choose what this session reads: free, one of your books (defaults to the most recent), or
+    // add a new one by scanning its barcode. Books stay out of a 4th tab — they live here, where a
+    // session begins.
+    private var bookSelector: some View {
+        Menu {
+            Button { selectedBook = nil } label: {
+                Label("Free reading", systemImage: selectedBook == nil ? "checkmark" : "book.closed")
+            }
+            if !books.isEmpty {
+                Divider()
+                ForEach(books) { book in
+                    Button { selectedBook = book } label: {
+                        Label(book.title,
+                              systemImage: book.persistentModelID == selectedBook?.persistentModelID ? "checkmark" : "book")
+                    }
+                }
+            }
+            Divider()
+            Button { showAddBook = true } label: {
+                Label("Add a book…", systemImage: "barcode.viewfinder")
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selectedBook == nil ? "book.closed" : "book.fill")
+                Text(selectedBook?.title ?? "Free reading")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Image(systemName: "chevron.up.chevron.down").font(.caption2)
+            }
+            .font(.subheadline.weight(.medium))
+            .foregroundStyle(Color.camusean)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 18)
+            .background(Capsule().fill(Color.camusean.opacity(0.09)))
+        }
     }
 
     private var heroMark: some View {
@@ -202,6 +270,7 @@ struct ReadingSessionView: View {
     private var startCTA: some View {
         VStack(spacing: 13) {
             Button {
+                vm.activeBook = selectedBook
                 Task { await vm.startSession() }
             } label: {
                 HStack(spacing: 9) {
