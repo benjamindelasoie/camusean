@@ -127,11 +127,13 @@ camusean/                        ← repo root (you are here)
 
 ## GBrain Configuration (configured by /setup-gbrain)
 - Mode: local-stdio
-- Engine: pglite
+- Engine: pglite (gbrain 0.42.58.0, brain at `~/.gbrain/brain.pglite`)
 - Config file: `~/.gbrain/config.json` (mode 0600)
-- Setup date: 2026-05-17
-- MCP registered: yes (user scope)
-- Artifacts sync: off
+- Embeddings: **deferred (no provider)** — keyword + symbol search only. Semantic search needs an embedding key: `gbrain config set embedding_model voyage:voyage-code-3` (or openai) then re-sync.
+- Setup date: 2026-07-12
+- MCP registered: yes (user scope) — restart Claude Code sessions to load `mcp__gbrain__*` tools
+- Trust policy: personal (local single-tenant)
+- Artifacts sync: off (local only)
 - Current repo policy: read-write
 
 ## GBrain Search Guidance (configured by /sync-gbrain)
