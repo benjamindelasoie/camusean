@@ -15,6 +15,9 @@ struct SettingsView: View {
     @State private var saveMessage = ""
     @State private var saveSuccess = false
     @State private var showVoiceSheet = false
+    /// Diagnostics stay hidden until the version row is tapped seven times.
+    @State private var showDeveloperSection = false
+    @State private var versionTapCount = 0
 
     var body: some View {
         NavigationStack {
@@ -52,10 +55,19 @@ struct SettingsView: View {
             .onChange(of: sourceLanguageLocale) { _, newLocale in
                 sourceLanguageName = ReadingLanguage.named(locale: newLocale).name
             }
+
+            // This is a reading preference, not a diagnostic — it changes which word the
+            // reader hears defined. It used to live under "Developer" next to the debug
+            // overlay, where nobody would find it.
+            Toggle(isOn: $wordCorrectionEnabled) {
+                Label("Correct misheard words", systemImage: "wand.and.sparkles")
+            }
         } header: {
             Text("Language")
         } footer: {
-            Text("Words spoken in this language will be transcribed and defined in English.")
+            Text("Words spoken in this language will be transcribed and defined in English. "
+                 + "Correcting misheard words lets the dictionary fix likely speech-recognition "
+                 + "misfires before defining; turn it off to keep the exact transcription.")
         }
     }
 
@@ -71,7 +83,7 @@ struct SettingsView: View {
                     if TTSService.hasEnhancedVoice(forLanguagePrefix: lang.prefix) {
                         Label("Enhanced", systemImage: "checkmark.circle.fill")
                             .font(.caption.weight(.semibold))
-                            .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.40))
+                            .foregroundStyle(Color.camuseanSuccess)
                     } else {
                         Text("Default")
                             .font(.caption.weight(.semibold))
@@ -104,7 +116,7 @@ struct SettingsView: View {
             if hasStoredKey {
                 Label("A key is already set up", systemImage: "checkmark.seal.fill")
                     .font(.callout)
-                    .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.40))
+                    .foregroundStyle(Color.camuseanSuccess)
             }
 
             HStack {
@@ -143,7 +155,7 @@ struct SettingsView: View {
             if !saveMessage.isEmpty {
                 Label(saveMessage, systemImage: saveSuccess ? "checkmark.circle.fill" : "xmark.circle.fill")
                     .font(.caption)
-                    .foregroundStyle(saveSuccess ? Color(red: 0.18, green: 0.62, blue: 0.40) : .red)
+                    .foregroundStyle(saveSuccess ? Color.camuseanSuccess : .red)
             }
         } header: {
             Text("Anthropic API Key")
@@ -178,6 +190,19 @@ struct SettingsView: View {
             } label: {
                 Label("Privacy Policy", systemImage: "hand.raised")
             }
+            // Tapping the version seven times reveals the diagnostics section. The overlay
+            // has to stay reachable in Release to debug TestFlight builds, but a section
+            // headed "Developer" with a ladybug in it is not something a reader should meet
+            // on their way to the privacy policy.
+            Button {
+                versionTapCount += 1
+                if versionTapCount >= 7 { showDeveloperSection = true }
+            } label: {
+                LabeledContent("Version", value: appVersion)
+                    .foregroundStyle(.primary)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("Tap seven times to show diagnostics")
         } header: {
             Text("About")
         } footer: {
@@ -185,20 +210,27 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Developer Section
+    private var appVersion: String {
+        let info = Bundle.main.infoDictionary
+        let short = info?["CFBundleShortVersionString"] as? String ?? "—"
+        let build = info?["CFBundleVersion"] as? String ?? "—"
+        return "\(short) (\(build))"
+    }
 
+    // MARK: - Diagnostics Section
+
+    @ViewBuilder
     private var developerSection: some View {
-        Section {
-            Toggle(isOn: $showSessionDebugOverlay) {
-                Label("Session debug overlay", systemImage: "ladybug")
+        if showDeveloperSection {
+            Section {
+                Toggle(isOn: $showSessionDebugOverlay) {
+                    Label("Session debug overlay", systemImage: "ladybug")
+                }
+            } header: {
+                Text("Diagnostics")
+            } footer: {
+                Text("Shows a live recognition diagnostics panel on the reading screen.")
             }
-            Toggle(isOn: $wordCorrectionEnabled) {
-                Label("Correct misheard words", systemImage: "wand.and.sparkles")
-            }
-        } header: {
-            Text("Developer")
-        } footer: {
-            Text("Session debug overlay shows a live recognition diagnostics panel on the reading screen. Correct misheard words lets the dictionary fix likely speech-recognition misfires before defining; turn off to keep the exact transcription (misfires are still logged either way).")
         }
     }
 

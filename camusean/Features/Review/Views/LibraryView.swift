@@ -10,6 +10,9 @@ struct LibraryView: View {
     @State private var searchText: String = ""
     @State private var selectedWord: Word?
 
+    // Display type on the detail sheet — scales with the reader's text-size setting.
+    @ScaledMetric(relativeTo: .largeTitle) private var detailWordSize: CGFloat = 36
+
     enum LibraryFilter: String, CaseIterable, Identifiable {
         case all = "All"
         case due = "Due"
@@ -109,7 +112,10 @@ struct LibraryView: View {
                         }
                     }
                 } label: {
+                    // Measured at 34.7 x 36pt as a bare Image — under the 44pt floor.
                     Image(systemName: "arrow.up.arrow.down")
+                        .frame(width: 44, height: 44)
+                        .contentShape(Rectangle())
                         .accessibilityLabel("Sort")
                 }
             }
@@ -170,10 +176,14 @@ struct LibraryView: View {
 
     @ViewBuilder
     private func rowView(for word: Word) -> some View {
-        libraryRow(for: word)
+        // A Button, not .onTapGesture: the row carries an accessibility hint promising
+        // "double tap for full definition", and only a real button gives VoiceOver the
+        // trait to honour it.
+        Button { selectedWord = word } label: {
+            libraryRow(for: word)
+        }
+            .buttonStyle(.plain)
             .listRowInsets(.init(top: 12, leading: 20, bottom: 12, trailing: 20))
-            .contentShape(Rectangle())
-            .onTapGesture { selectedWord = word }
             .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                 Button(role: .destructive) {
                     delete(word)
@@ -192,7 +202,7 @@ struct LibraryView: View {
         HStack(alignment: .center) {
             VStack(alignment: .leading, spacing: 4) {
                 Text(word.word)
-                    .font(.system(size: 18, weight: .semibold, design: .serif))
+                    .font(.system(.headline, design: .serif))
                     .lineLimit(1)
 
                 if !word.definition.isEmpty {
@@ -216,17 +226,17 @@ struct LibraryView: View {
     private func dueDatePill(for word: Word) -> some View {
         if let nrd = word.nextReviewDate {
             Text(relativeDate(nrd))
-                .font(.system(size: 11, weight: .medium))
+                .font(.caption2.weight(.medium))
                 .foregroundStyle(.secondary)
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Color(.systemGray6))
                 .clipShape(Capsule())
         } else {
             Text("New")
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(Color.camusean)
-                .padding(.horizontal, 9)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color.camuseanText)
+                .padding(.horizontal, 8)
                 .padding(.vertical, 4)
                 .background(Color.camusean.opacity(0.12))
                 .clipShape(Capsule())
@@ -250,15 +260,19 @@ struct LibraryView: View {
     private func statCell(value: Int, label: String) -> some View {
         VStack(spacing: 4) {
             Text("\(value)")
-                .font(.system(size: 22, weight: .medium, design: .serif))
+                .font(.system(.title2, design: .serif).weight(.medium))
                 .foregroundStyle(.primary)
+            // Was a fixed 9pt, below any reasonable floor and unaffected by the reader's
+            // text-size setting.
             Text(label)
-                .font(.system(size: 9, weight: .semibold))
+                .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
                 .kerning(0.8)
                 .multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(value) \(label.replacingOccurrences(of: "\n", with: " ").lowercased())")
     }
 
     // MARK: - Filter chips
@@ -270,14 +284,17 @@ struct LibraryView: View {
                     filter = f
                 } label: {
                     Text(f.rawValue)
-                        .font(.system(size: 13, weight: .medium))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 7)
+                        .font(.footnote.weight(.medium))
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        // Was ~30pt tall. 44pt is the HIG floor for anything tappable.
+                        .frame(minHeight: 44)
                         .background(filter == f ? Color.camusean : Color(.systemGray6))
                         .foregroundStyle(filter == f ? .white : .primary)
                         .clipShape(Capsule())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(filter == f ? [.isButton, .isSelected] : .isButton)
             }
             Spacer()
         }
@@ -299,7 +316,7 @@ struct LibraryView: View {
             }
             VStack(spacing: 8) {
                 Text("No words yet")
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .font(.system(.title2, design: .serif).weight(.semibold))
                 Text("Start a reading session\nto build your vocabulary.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -322,7 +339,7 @@ struct LibraryView: View {
             }
             VStack(spacing: 8) {
                 Text("No matches")
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .font(.system(.title2, design: .serif).weight(.semibold))
                 Text(searchText.isEmpty
                      ? "No words in this filter."
                      : "No words match \u{201C}\(searchText)\u{201D}.")
@@ -340,7 +357,7 @@ struct LibraryView: View {
     private func detailSheet(_ word: Word) -> some View {
         VStack(alignment: .leading, spacing: 18) {
             Text(word.word)
-                .font(.system(size: 36, weight: .bold, design: .serif))
+                .font(.system(size: detailWordSize, weight: .bold, design: .serif))
                 .padding(.top, 8)
 
             if !word.definition.isEmpty {
@@ -369,7 +386,7 @@ struct LibraryView: View {
                 if let bookTitle = word.book?.title {
                     HStack(spacing: 6) {
                         Image(systemName: "book.closed")
-                            .font(.system(size: 11))
+                            .font(.caption2)
                             .foregroundStyle(.tertiary)
                         Text("From \(bookTitle)")
                             .font(.caption)
@@ -379,7 +396,7 @@ struct LibraryView: View {
                 if let nrd = word.nextReviewDate {
                     HStack(spacing: 6) {
                         Image(systemName: "calendar")
-                            .font(.system(size: 11))
+                            .font(.caption2)
                             .foregroundStyle(.tertiary)
                         Text("Next review \(relativeDate(nrd))")
                             .font(.caption)

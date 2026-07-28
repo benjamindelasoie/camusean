@@ -12,7 +12,7 @@ struct VoiceSetupSheet: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
             Text("Hear the best voices")
-                .font(.system(size: 26, weight: .bold, design: .serif))
+                .font(.system(.title, design: .serif).weight(.bold))
                 .padding(.top, 12)
 
             Text("Camusean reads words and definitions out loud. Apple's built-in voice sounds robotic. The Enhanced voices are dramatically better, but you download them once in iOS Settings.")
@@ -30,7 +30,7 @@ struct VoiceSetupSheet: View {
                         Spacer()
                         statusBadge(for: lang)
                     }
-                    .padding(.vertical, 7)
+                    .padding(.vertical, 8)
                     .padding(.horizontal, 12)
                     .background(Color.secondary.opacity(0.07), in: .rect(cornerRadius: 10))
                 }
@@ -50,10 +50,10 @@ struct VoiceSetupSheet: View {
                 Text("Got it")
                     .font(.body.weight(.semibold))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 17)
+                    .padding(.vertical, 16)
                     .background(Color.camusean)
                     .foregroundStyle(.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 15))
+                    .clipShape(RoundedRectangle(cornerRadius: 16))
             }
         }
         .padding(.horizontal, 28)
@@ -69,7 +69,7 @@ struct VoiceSetupSheet: View {
         if TTSService.hasEnhancedVoice(forLanguagePrefix: lang.prefix) {
             Label("Enhanced", systemImage: "checkmark.circle.fill")
                 .font(.caption.weight(.semibold))
-                .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.40))
+                .foregroundStyle(Color.camuseanSuccess)
         } else {
             Label("Default", systemImage: "exclamationmark.circle")
                 .font(.caption.weight(.semibold))
@@ -94,8 +94,8 @@ struct VoiceSetupSheet: View {
     private func instructionRow(number: String, text: String) -> some View {
         HStack(alignment: .top, spacing: 12) {
             Text(number)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(Color.camusean)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.camuseanText)
                 .frame(width: 18, alignment: .leading)
             Text(text)
                 .font(.callout)
