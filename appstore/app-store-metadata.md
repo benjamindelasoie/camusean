@@ -87,11 +87,21 @@ crowded buckets if a more precise one fits — precision is an anti-spam signal.
 ---
 
 ## URLs  (fields: Support URL / Marketing URL / Privacy Policy URL)
-Host appstore/web/index.html and appstore/web/privacy.html somewhere public
-(GitHub Pages, Netlify drop, Cloudflare Pages — all free), then:
-• Support URL:        https://<your-site>/            (or a #support anchor)
-• Marketing URL:      https://<your-site>/
-• Privacy Policy URL: https://<your-site>/privacy.html
+LIVE as of 2026-07-28. appstore/web/ is deployed to Vercel (project `camusean`).
+Paste these verbatim into App Store Connect:
+• Support URL:        https://camusean.vercel.app/
+• Marketing URL:      https://camusean.vercel.app/
+• Privacy Policy URL: https://camusean.vercel.app/privacy.html
+
+⚠️ Use the bare `camusean.vercel.app` host and NOTHING else. The project-scoped
+aliases (camusean-<hash>-benjamindelasoies-projects.vercel.app) sit behind Vercel
+Authentication and redirect to a vercel.com login page — an App Review reviewer
+would hit a login wall, which is a 5.1.2 rejection. Those protected URLs still
+answer HTTP 200 on the redirect, so a status-code check alone will not catch it;
+verify by following redirects:
+    curl -sL -o /dev/null -w '%{url_effective}\n' https://camusean.vercel.app/privacy.html
+
+Redeploy after editing the html:  vercel deploy --cwd appstore/web --prod --yes
 
 A real, resolving web presence is a meaningful "this is a genuine product"
 signal for a 4.3 review.
