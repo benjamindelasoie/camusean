@@ -16,11 +16,14 @@ voice-driven lookup tool. To experience it:
 
 1. Open the app -> "Read" tab -> tap "Begin Reading".
 2. When prompted, allow Microphone and Speech Recognition.
-3. Hold the push-to-talk button and say a French word aloud,
+3. The app is now listening — no button to hold. Just say a French word aloud,
    e.g. "bibliotheque" or "flaneur".
-4. Release. Within about one second you will HEAR the English definition
+4. Pause. Within about one second you will HEAR the English definition
    spoken aloud, see it on screen, and the word is saved automatically.
-5. Open the "Review" tab to study saved words as flashcards (swipe left = known).
+   The app keeps listening, so you can say the next word straight away.
+5. Tap "End session" when done.
+6. Open the "Review" tab to study saved words as flashcards
+   (swipe right = learned, swipe left = repeat).
 
 Default reading language is French. It can be changed in Settings, which also
 offers English, Spanish, Italian, German and Portuguese.

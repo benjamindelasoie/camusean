@@ -67,10 +67,10 @@ struct PrivacyPolicyView: View {
         ]),
         Section(title: "Microphone and speech recognition", paragraphs: [
             """
-            When you start a reading session and use push-to-talk, the app records audio so it \
-            can recognize the word you spoke. Audio is captured only while you are holding the \
-            talk button, it is used solely to transcribe what you said, and the app does not \
-            store your recordings.
+            While a reading session is active, the app listens through the microphone so it can \
+            recognize the word you speak. Audio is captured only during a session — it starts \
+            when you tap Begin Reading and stops when you end the session — it is used solely \
+            to transcribe what you said, and the app does not store your recordings.
             """,
             """
             Recognition uses Apple's built-in speech frameworks. On iOS 26 and later this runs \

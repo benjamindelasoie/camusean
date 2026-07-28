@@ -5,6 +5,7 @@ struct ReadingSessionView: View {
     @State private var vm = SessionViewModel()
     @Environment(\.modelContext) private var modelContext
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.openURL) private var openURL
 
     // All words; used only to compute the weekly "learned" count for the progress strip.
@@ -30,6 +31,14 @@ struct ReadingSessionView: View {
     #endif
 
     private static let voicePromptShownKey = "voicePromptShown"
+
+    // Display type. These were fixed point sizes that ignored the reader's text-size
+    // setting entirely — at accessibility sizes the app title ended up smaller than the
+    // body copy beneath it. @ScaledMetric keeps the design size at the default setting
+    // and scales from there.
+    @ScaledMetric(relativeTo: .largeTitle) private var heroTitleSize: CGFloat = 38
+    @ScaledMetric(relativeTo: .largeTitle) private var resultWordSize: CGFloat = 40
+    @ScaledMetric(relativeTo: .title) private var transcriptionSize: CGFloat = 30
 
     // A single `.sheet(item:)` presenter. Two `.sheet(isPresented:)` modifiers on
     // one view is a SwiftUI conflict that eats taps in the presented sheet.
@@ -182,18 +191,31 @@ struct ReadingSessionView: View {
     // MARK: - Start Screen
 
     private var startScreen: some View {
-        VStack(spacing: 0) {
-            Spacer()
-            heroMark
-            Spacer().frame(height: 36)
-            heroText
-            Spacer()
-            bookSelector
-            Spacer().frame(height: 18)
-            startCTA
+        // Scrolls only when it has to. At accessibility text sizes the pitch and the CTA
+        // no longer fit a single screen, and a fixed VStack simply ran them off the bottom
+        // and under the tab bar. `.basedOnSize` keeps the normal case feeling static.
+        GeometryReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    Spacer(minLength: 24)
+                    heroMark
+                    Spacer().frame(height: 32)
+                    heroText
+                    // Capped, so surplus height goes above the hero instead of opening a
+                    // dead band between the pitch and the controls. Two unbounded Spacers
+                    // split the slack evenly, which left roughly a fifth of a 6.9" screen
+                    // empty in the middle.
+                    Spacer().frame(minHeight: 32, maxHeight: 96)
+                    bookSelector
+                    Spacer().frame(height: 16)
+                    startCTA
+                }
+                .padding(.horizontal, 32)
+                .padding(.bottom, 24)
+                .frame(minHeight: proxy.size.height)
+            }
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .padding(.horizontal, 36)
-        .padding(.bottom, 52)
     }
 
     // Choose what this session reads: free, one of your books (defaults to the most recent), or
@@ -226,36 +248,47 @@ struct ReadingSessionView: View {
                 Image(systemName: "chevron.up.chevron.down").font(.caption2)
             }
             .font(.subheadline.weight(.medium))
-            .foregroundStyle(Color.camusean)
-            .padding(.vertical, 10)
-            .padding(.horizontal, 18)
-            .background(Capsule().fill(Color.camusean.opacity(0.09)))
+            .foregroundStyle(Color.camuseanText)
+            .padding(.vertical, 12)
+            .padding(.horizontal, 16)
+            .frame(minHeight: 44)
+            .background(Capsule().fill(Color.camusean.opacity(0.12)))
         }
     }
 
     private var heroMark: some View {
-        ZStack {
+        // Purely decorative, so at accessibility text sizes it yields room to the words
+        // and the button rather than pushing them off the fold.
+        let scale: CGFloat = typeSize.isAccessibilitySize ? 0.6 : 1
+        return ZStack {
             Circle()
                 .fill(Color.camusean.opacity(0.07))
-                .frame(width: 156, height: 156)
+                .frame(width: 156 * scale, height: 156 * scale)
             Circle()
                 .fill(Color.camusean.opacity(0.11))
-                .frame(width: 120, height: 120)
+                .frame(width: 120 * scale, height: 120 * scale)
             Image(systemName: "book.pages")
-                .font(.system(size: 52, weight: .light))
+                .font(.system(size: 52 * scale, weight: .light))
                 .foregroundStyle(Color.camusean)
         }
+        .accessibilityHidden(true)
     }
 
     private var heroText: some View {
-        VStack(spacing: 14) {
+        VStack(spacing: 12) {
             Text("Camusean")
-                .font(.system(size: 38, weight: .bold, design: .serif))
+                .font(.system(size: heroTitleSize, weight: .bold, design: .serif))
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            // Two lines by design, but never truncated: at accessibility text sizes the
+            // second line ("Hear its meaning. Keep reading.") used to disappear entirely,
+            // taking half the pitch with it.
             Text("Say a word you don't know.\nHear its meaning. Keep reading.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .lineSpacing(5)
+                .lineSpacing(4)
+                .fixedSize(horizontal: false, vertical: true)
             if case .error(let msg) = vm.phase {
                 Text(msg)
                     .font(.caption)
@@ -268,21 +301,26 @@ struct ReadingSessionView: View {
     }
 
     private var startCTA: some View {
-        VStack(spacing: 13) {
+        VStack(spacing: 12) {
             Button {
                 vm.activeBook = selectedBook
                 Task { await vm.startSession() }
             } label: {
-                HStack(spacing: 9) {
+                HStack(spacing: 8) {
                     Image(systemName: "waveform")
+                    // The label used to truncate to "Begin Re…" at accessibility text
+                    // sizes. It is the primary call to action; it wraps instead.
                     Text("Begin Reading")
                         .fontWeight(.semibold)
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.7)
+                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
-                .padding(.vertical, 18)
+                .padding(.vertical, 16)
                 .background(Color.camusean)
                 .foregroundStyle(.white)
-                .clipShape(RoundedRectangle(cornerRadius: 17))
+                .clipShape(RoundedRectangle(cornerRadius: 16))
             }
             if vm.permissionDenied {
                 // iOS won't re-prompt after a denial — give a direct route to flip it on.
@@ -291,13 +329,15 @@ struct ReadingSessionView: View {
                 } label: {
                     Text("Open Settings")
                         .font(.subheadline.weight(.semibold))
-                        .foregroundStyle(Color.camusean)
+                        .foregroundStyle(Color.camuseanText)
+                        .frame(maxWidth: .infinity, minHeight: 44)
+                        .contentShape(Rectangle())
                 }
-                .padding(.top, 2)
             } else {
                 Text("Requires microphone & speech recognition")
                     .font(.caption2)
-                    .foregroundStyle(Color(.tertiaryLabel))
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
             }
         }
     }
@@ -325,10 +365,14 @@ struct ReadingSessionView: View {
 
             Spacer()
 
+            // The only way out of a session. It rendered at tertiaryLabel (1.73:1 on white)
+            // in a ~20pt-tall hit area — the least legible, hardest-to-hit control in the app.
             Button("End session") { vm.endSession() }
-                .font(.subheadline)
-                .foregroundStyle(Color(.tertiaryLabel))
-                .padding(.bottom, 40)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(.secondary)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+                .padding(.bottom, 32)
         }
         .safeAreaInset(edge: .top) {
             if showSessionDebugOverlay { debugOverlay }
@@ -382,16 +426,16 @@ struct ReadingSessionView: View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 Text("CAMUSEAN")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundStyle(Color(.tertiaryLabel))
-                    .kerning(2.5)
+                    .font(.system(.caption2, design: .monospaced).weight(.bold))
+                    .foregroundStyle(.secondary)
+                    .kerning(2)
                 Spacer()
                 if vm.lookupCount > 0 {
                     Text("\(vm.lookupCount) word\(vm.lookupCount == 1 ? "" : "s")")
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(Color.camusean)
+                        .font(.caption.weight(.medium))
+                        .foregroundStyle(Color.camuseanText)
                         .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
+                        .padding(.vertical, 4)
                         .background(Color.camusean.opacity(0.12))
                         .clipShape(Capsule())
                         .transition(reduceMotion ? .opacity : .scale(scale: 0.8).combined(with: .opacity))
@@ -402,12 +446,12 @@ struct ReadingSessionView: View {
                 HStack(spacing: 4) {
                     Text("\(learnedThisWeekCount)")
                         .font(.caption.weight(.medium))
-                        .foregroundStyle(Color.camusean)
+                        .foregroundStyle(Color.camuseanText)
                     Text(learnedThisWeekCount == 1
                          ? "word learned this week"
                          : "words learned this week")
                         .font(.caption)
-                        .foregroundStyle(Color(.tertiaryLabel))
+                        .foregroundStyle(.secondary)
                 }
             }
         }
@@ -444,7 +488,7 @@ struct ReadingSessionView: View {
                     }
                 } else {
                     Text(vm.partialTranscription)
-                        .font(.system(size: 30, weight: .semibold, design: .serif))
+                        .font(.system(size: transcriptionSize, weight: .semibold, design: .serif))
                         .multilineTextAlignment(.center)
                         .transition(.asymmetric(
                             insertion: .scale(scale: 0.88).combined(with: .opacity),
@@ -455,7 +499,7 @@ struct ReadingSessionView: View {
             case .processing(let word):
                 VStack(spacing: 14) {
                     Text(word)
-                        .font(.system(size: 40, weight: .bold, design: .serif))
+                        .font(.system(size: resultWordSize, weight: .bold, design: .serif))
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .minimumScaleFactor(0.5)
@@ -466,7 +510,7 @@ struct ReadingSessionView: View {
             case .result(let word, let definition, let formNote):
                 VStack(spacing: 18) {
                     Text(word)
-                        .font(.system(size: 40, weight: .bold, design: .serif))
+                        .font(.system(size: resultWordSize, weight: .bold, design: .serif))
                         .multilineTextAlignment(.center)
                         .lineLimit(2)
                         .minimumScaleFactor(0.5)
@@ -486,7 +530,7 @@ struct ReadingSessionView: View {
                             Text(formNote)
                                 .font(.footnote)
                                 .italic()
-                                .foregroundStyle(Color.camusean.opacity(0.75))
+                                .foregroundStyle(Color.camuseanText)
                                 .multilineTextAlignment(.center)
                         }
                     }
@@ -529,8 +573,8 @@ struct ReadingSessionView: View {
             }
             Spacer().frame(height: 28)
             Text("Session complete")
-                .font(.system(size: 26, weight: .bold, design: .serif))
-            Spacer().frame(height: 10)
+                .font(.system(.title, design: .serif).weight(.bold))
+            Spacer().frame(height: 12)
             Text(vm.lookupCount == 0
                  ? "No words looked up"
                  : "\(vm.lookupCount) word\(vm.lookupCount == 1 ? "" : "s") saved to review")
@@ -541,7 +585,7 @@ struct ReadingSessionView: View {
                 Text("Done")
                     .font(.body.weight(.semibold))
                     .frame(maxWidth: .infinity)
-                    .padding(.vertical, 18)
+                    .padding(.vertical, 16)
                     .background(Color.camusean)
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 16))
@@ -568,6 +612,13 @@ private struct OrganicMicView: View {
     @State private var spinAngle: Double = 0
 
     var body: some View {
+        Button(action: onTap) { dial }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isListening ? "Listening" : isProcessing ? "Processing" : "Standby")
+            .accessibilityHint(isListening || isProcessing ? "Cancels the current lookup" : "")
+    }
+
+    private var dial: some View {
         ZStack {
             // Breathing rings
             ForEach(0..<3, id: \.self) { i in
@@ -628,8 +679,11 @@ private struct OrganicMicView: View {
                 .opacity(isListening || isProcessing ? 1.0 : 0.45)
                 .animation(.easeInOut(duration: 0.3), value: isListening)
         }
+        // Was a bare .onTapGesture, which left the app's central control as static text to
+        // VoiceOver: the label was announced but no button trait came with it, so it was
+        // not reliably activatable. The wrapping Button (above) supplies the trait, the
+        // activation, and Full Keyboard Access.
         .contentShape(Circle())
-        .onTapGesture { onTap() }
         .onAppear {
             guard !reduceMotion else { return }
             breathe = true
@@ -640,7 +694,6 @@ private struct OrganicMicView: View {
         .onChange(of: isListening) { _, newVal in
             if newVal && !reduceMotion { breathe = true }
         }
-        .accessibilityLabel(isListening ? "Listening" : isProcessing ? "Processing" : "Standby")
     }
 }
 

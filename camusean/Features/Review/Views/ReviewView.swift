@@ -10,6 +10,11 @@ struct ReviewView: View {
     @State private var currentIndex = 0
     @State private var isRevealed = false
     @State private var dragOffset: CGFloat = 0
+    @State private var showDeleteConfirm = false
+
+    // The big serif word. A fixed 48pt never moved with the reader's text-size setting;
+    // @ScaledMetric keeps the design size at the default and scales it from there.
+    @ScaledMetric(relativeTo: .largeTitle) private var cardWordSize: CGFloat = 48
 
     // The deck shown to the user: words with no schedule yet (new) or due now.
     private var words: [Word] {
@@ -33,6 +38,16 @@ struct ReviewView: View {
             }
             .navigationTitle("Review")
             .navigationBarTitleDisplayMode(.large)
+            .confirmationDialog(
+                "Delete this word?",
+                isPresented: $showDeleteConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Delete", role: .destructive) { deleteCurrentWord() }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("It will be removed from your library and your review schedule. This can't be undone.")
+            }
             .toolbar {
                 if !allWords.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
@@ -62,7 +77,7 @@ struct ReviewView: View {
             }
             VStack(spacing: 8) {
                 Text("No words yet")
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .font(.system(.title2, design: .serif).weight(.semibold))
                 Text("Start a reading session\nto build your vocabulary.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -81,11 +96,11 @@ struct ReviewView: View {
                     .frame(width: 100, height: 100)
                 Image(systemName: "checkmark")
                     .font(.system(size: 38, weight: .light))
-                    .foregroundStyle(Color.camusean)
+                    .foregroundStyle(Color.camuseanText)
             }
             VStack(spacing: 8) {
                 Text("All caught up")
-                    .font(.system(size: 22, weight: .semibold, design: .serif))
+                    .font(.system(.title2, design: .serif).weight(.semibold))
                 Text("Come back tomorrow.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -95,9 +110,12 @@ struct ReviewView: View {
             } label: {
                 Text("Browse all your words →")
                     .font(.subheadline.weight(.medium))
-                    .foregroundStyle(Color.camusean)
+                    .foregroundStyle(Color.camuseanText)
+                    // 44pt minimum hit target — the label alone is ~20pt tall.
+                    .frame(minHeight: 44)
+                    .padding(.horizontal, 8)
+                    .contentShape(Rectangle())
             }
-            .padding(.top, 8)
         }
         .padding(40)
     }
@@ -114,24 +132,8 @@ struct ReviewView: View {
             Spacer()
 
             ZStack {
-                // Decorative stack shadow cards
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color(.systemBackground))
-                    .padding(.horizontal, 44)
-                    .frame(height: cardHeight - 16)
-                    .offset(y: 14)
-                    .opacity(0.55)
-                    .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
-
-                RoundedRectangle(cornerRadius: 24)
-                    .fill(Color(.systemBackground))
-                    .padding(.horizontal, 34)
-                    .frame(height: cardHeight - 8)
-                    .offset(y: 7)
-                    .opacity(0.75)
-                    .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
-
-                // Live card
+                // Live card. The decorative cards peeking out behind it are drawn in its
+                // .background, so they track its height instead of a shared constant.
                 flashcard(for: words[currentIndex])
                     .offset(x: dragOffset)
                     .rotationEffect(.degrees(Double(dragOffset) / 24))
@@ -162,55 +164,91 @@ struct ReviewView: View {
         }
     }
 
-    private var cardHeight: CGFloat { 380 }
+    /// Floor, not a fixed height. The card used to be pinned at 380pt regardless of what
+    /// was on it, so at default text size the revealed side was roughly 60% empty white —
+    /// it only looked right at accessibility sizes, which is what it had been sized for.
+    /// It now grows with its content and scales with the reader's text-size setting.
+    @ScaledMetric(relativeTo: .largeTitle) private var cardMinHeight: CGFloat = 260
 
     private var progressBar: some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: 8) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
                         .fill(Color(.systemGray5))
-                        .frame(height: 3)
+                        .frame(height: 6)
                     Capsule()
-                        .fill(Color.camusean.opacity(0.65))
+                        .fill(Color.camusean)
+                        // The label reads "1 of 29", so the bar has to agree: card 1 of 29
+                        // is 1/29 done, not 0/29. It used to divide by `currentIndex`, which
+                        // rendered an empty track under a label saying "1 of 29".
                         .frame(
-                            width: geo.size.width * CGFloat(currentIndex) / CGFloat(max(words.count, 1)),
-                            height: 3
+                            width: geo.size.width * CGFloat(currentIndex + 1) / CGFloat(max(words.count, 1)),
+                            height: 6
                         )
                         .animation(.spring(duration: 0.4), value: currentIndex)
                 }
             }
-            .frame(height: 3)
+            .frame(height: 6)
+            .accessibilityElement()
+            .accessibilityLabel("Progress")
+            .accessibilityValue("Card \(currentIndex + 1) of \(words.count)")
             Text("\(currentIndex + 1) of \(words.count)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(Color(.tertiaryLabel))
+                .font(.caption2.weight(.medium))
+                .foregroundStyle(.secondary)
         }
     }
 
     private func flashcard(for word: Word) -> some View {
-        RoundedRectangle(cornerRadius: 24)
-            .fill(Color(.systemBackground))
-            .shadow(color: .black.opacity(0.11), radius: 22, y: 8)
-            .frame(height: cardHeight)
+        cardBody(for: word)
+            .frame(maxWidth: .infinity)
+            .frame(minHeight: cardMinHeight)
+            .background {
+                ZStack {
+                    // The two cards peeking out behind. Drawn in the background so they
+                    // inherit the live card's height rather than a shared constant.
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(Color.camuseanCard)
+                        .padding(.horizontal, 20)
+                        .padding(.vertical, 8)
+                        .offset(y: 16)
+                        .opacity(0.55)
+                        .shadow(color: .black.opacity(0.04), radius: 6, y: 2)
+
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(Color.camuseanCard)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .offset(y: 8)
+                        .opacity(0.75)
+                        .shadow(color: .black.opacity(0.06), radius: 10, y: 3)
+
+                    RoundedRectangle(cornerRadius: 24)
+                        .fill(Color.camuseanCard)
+                        .shadow(color: .black.opacity(0.11), radius: 22, y: 8)
+                }
+            }
             .overlay(alignment: .topTrailing) {
-                Button(action: dismiss) {
+                // Destructive and irreversible, so it asks first. 44pt hit area — it used to
+                // be 32pt in the corner of a card the reader is actively dragging, which made
+                // a mis-swipe capable of silently deleting the word.
+                Button { showDeleteConfirm = true } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .semibold))
-                        .foregroundStyle(.tertiary)
-                        .frame(width: 32, height: 32)
+                        .foregroundStyle(.secondary)
+                        .frame(width: 44, height: 44)
                         .contentShape(Rectangle())
                 }
-                .padding(.top, 6)
-                .padding(.trailing, 10)
                 .accessibilityLabel("Delete word")
             }
             .padding(.horizontal, 24)
-            .overlay {
-                VStack(spacing: 0) {
-                    Spacer()
+            .animation(.spring(duration: 0.42, bounce: 0.08), value: isRevealed)
+    }
 
+    private func cardBody(for word: Word) -> some View {
+                VStack(spacing: 0) {
                     Text(word.word)
-                        .font(.system(size: 48, weight: .bold, design: .serif))
+                        .font(.system(size: cardWordSize, weight: .bold, design: .serif))
                         .minimumScaleFactor(0.4)
                         .lineLimit(2)
                         .multilineTextAlignment(.center)
@@ -221,33 +259,32 @@ struct ReviewView: View {
                     if !isRevealed {
                         // Language tag
                         Text(word.sourceLanguage.components(separatedBy: "-").first ?? word.sourceLanguage)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.caption2.weight(.semibold))
                             .foregroundStyle(.secondary)
-                            .padding(.horizontal, 14)
+                            .padding(.horizontal, 12)
                             .padding(.vertical, 6)
                             .background(Color(.systemGray6))
                             .clipShape(Capsule())
 
-                        Spacer()
+                        Spacer().frame(height: 32)
 
                         // Swipe direction hints — visible only while dragging
                         HStack {
                             Label("Repeat", systemImage: "arrow.clockwise")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color(.systemOrange))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Color.camuseanRepeat)
                                 .opacity(dragOffset < -20 ? 1 : 0)
                                 .animation(.easeOut(duration: 0.12), value: dragOffset)
 
                             Spacer()
 
                             Label("Learned", systemImage: "checkmark")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.40))
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(Color.camuseanSuccess)
                                 .opacity(dragOffset > 20 ? 1 : 0)
                                 .animation(.easeOut(duration: 0.12), value: dragOffset)
                         }
                         .padding(.horizontal, 28)
-                        .padding(.bottom, 26)
                     } else {
                         // Definition
                         Rectangle()
@@ -258,15 +295,18 @@ struct ReviewView: View {
                         Spacer().frame(height: 18)
 
                         ScrollView(showsIndicators: false) {
-                            VStack(spacing: 14) {
+                            VStack(spacing: 12) {
                                 if word.definition.isEmpty {
                                     Text("Definition unavailable")
                                         .foregroundStyle(.secondary)
                                         .italic()
                                 } else {
+                                    // The definition is the payoff — the reason the card was
+                                    // flipped. It used to render at .callout, smaller than the
+                                    // example sentence read, which inverted the hierarchy.
                                     Text(word.definition)
-                                        .font(.callout)
-                                        .foregroundStyle(.primary.opacity(0.85))
+                                        .font(.title3)
+                                        .foregroundStyle(.primary)
                                         .multilineTextAlignment(.center)
                                         .lineSpacing(4)
                                     // Where this form comes from, e.g. "Past participle of
@@ -276,7 +316,7 @@ struct ReviewView: View {
                                         Text(formNote)
                                             .font(.footnote)
                                             .italic()
-                                            .foregroundStyle(Color.camusean.opacity(0.75))
+                                            .foregroundStyle(Color.camuseanText)
                                             .multilineTextAlignment(.center)
                                     }
                                     if !word.exampleSentence.isEmpty {
@@ -291,12 +331,13 @@ struct ReviewView: View {
                             }
                             .padding(.horizontal, 28)
                         }
-
-                        Spacer().frame(height: 24)
                     }
                 }
-            }
-            .animation(.spring(duration: 0.42, bounce: 0.08), value: isRevealed)
+                // Take the card's ideal height, not whatever the surrounding Spacers offer.
+                // Without this the inner layout stretched to fill the screen, which is how
+                // the card ended up ~60% empty white at default text size.
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.vertical, 28)
     }
 
     // MARK: - Action Area
@@ -311,24 +352,26 @@ struct ReviewView: View {
                 } label: {
                     Text("Reveal definition")
                         .font(.body.weight(.semibold))
+                        .lineLimit(2)
+                        .minimumScaleFactor(0.8)
                         .frame(maxWidth: .infinity)
-                        .padding(.vertical, 17)
+                        .padding(.vertical, 16)
                         .background(Color.camusean)
                         .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 15))
+                        .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
             } else {
-                HStack(spacing: 14) {
+                HStack(spacing: 12) {
                     reviewButton(
                         label: "Repeat",
                         icon: "arrow.clockwise",
-                        fg: Color(.systemOrange),
+                        fg: Color.camuseanRepeat,
                         action: markRepeat
                     )
                     reviewButton(
                         label: "Learned",
                         icon: "checkmark",
-                        fg: Color(red: 0.18, green: 0.62, blue: 0.40),
+                        fg: Color.camuseanSuccess,
                         action: markLearned
                     )
                 }
@@ -338,17 +381,17 @@ struct ReviewView: View {
 
     private func reviewButton(label: String, icon: String, fg: Color, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            VStack(spacing: 7) {
+            VStack(spacing: 8) {
                 Image(systemName: icon)
                     .font(.system(size: 20, weight: .semibold))
                 Text(label)
-                    .font(.system(size: 12, weight: .medium))
+                    .font(.caption.weight(.medium))
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
             .foregroundStyle(fg)
-            .background(fg.opacity(0.10))
-            .clipShape(RoundedRectangle(cornerRadius: 14))
+            .background(fg.opacity(0.12))
+            .clipShape(RoundedRectangle(cornerRadius: 16))
         }
     }
 
@@ -378,7 +421,9 @@ struct ReviewView: View {
         resetCardState()
     }
 
-    private func dismiss() {
+    // Reached only through the confirmation dialog — see the card's "×" button.
+    private func deleteCurrentWord() {
+        guard currentIndex < words.count else { return }
         modelContext.delete(words[currentIndex])
         // Row removed entirely; the next due card slides into currentIndex.
         resetCardState()
