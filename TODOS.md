@@ -25,10 +25,15 @@ contributors and levers, by stage:
 1. **Silence endpointing.** ✅ **Partly shipped 2026-06-01** — lowered 1.0s → 0.6s via the
    named `SpeechService.silenceTimeout` constant. _Remaining:_ try 0.5s and/or dynamic
    endpointing; measure the false-cutoff rate on hardware before lowering further.
-2. **ASR path: on-device vs server.** `SFSpeechRecognizer` may round-trip to Apple's
-   servers unless `requiresOnDeviceRecognition = true`. On-device is faster for single
-   words, removes a network hop, and works offline. Verify current behavior; test forcing
-   on-device.
+2. **ASR path: on-device vs server.** ✅ **Shipped 2026-07-28** — confirmed the suspicion:
+   `requiresOnDeviceRecognition` was never set, so it defaulted to `false` and audio could
+   round-trip to Apple's servers on every lookup. Now set to
+   `recognizer.supportsOnDeviceRecognition` — gated rather than forced `true`, because
+   forcing it makes recognition fail outright for a locale whose offline assets aren't
+   installed. `backendName` reports `(on-device)` / `(server)` in the debug overlay.
+   _Caveat:_ this is the **legacy** path only (iOS 18–25). No available device runs it —
+   the iPhone 14 is on 26.5 and uses `DictationTranscriber`, which is already on-device —
+   so the change is unverified in the field. Watch the overlay if a non-26 user ever reports.
 3. **Speak the foreign word in parallel with the network call.** ✅ **Shipped 2026-06-01** —
    `SessionViewModel.lookup` now fires the definition request as `async let pending` and
    speaks the native word echo concurrently, so the echo hides the network round-trip
@@ -40,7 +45,9 @@ contributors and levers, by stage:
    begin speaking the definition as the first sentence arrives instead of awaiting the full
    JSON (may require a definition-first/plain-text output format so partials are speakable);
    prompt-cache the static instruction portion of the prompt; trim `max_tokens` (currently
-   256); pre-warm the HTTPS/TLS connection at session start (URLSession reuse / HTTP-2
+   384, raised from 256 when `formNote` was added — note it is a ceiling, so trimming it only
+   helps if replies are actually hitting it); pre-warm the HTTPS/TLS connection at session
+   start (URLSession reuse / HTTP-2
    keep-alive) so the first lookup doesn't pay the handshake; evaluate whether a different
    fast model meaningfully wins. Haiku is already the fast tier — measure before switching.
 6. **TTS first-utterance warmup.** `AVSpeechSynthesizer` has cold-start latency on its first
@@ -330,44 +337,3 @@ amber/cream/espresso palette and the book↔voice concept.
 
 **When to revisit.** Before a public App Store release (TestFlight-with-friends is fine as
 is). Low urgency.
-
----
-
-## 🗣️ Lookup prompt evolution: phrases, form-teaching, English-only spoken definition (v1.4 step 1 follow-up)
-
-**What.** A prompt + small data change to `AnthropicService.lookup`, decided with Benja
-2026-06-14 after device testing. Deferred so the book-spine features (steps 4–6) land first.
-Design is settled — implement as-is:
-
-1. **Accept a word OR a short phrase** (e.g. "fatigué" or "Il a disparu"). The recognizer
-   endpointing stays at 0.6s — Benja confirmed it's fine; no ASR change. The LLM handles
-   whatever transcription arrives.
-2. **Correct only genuine mishearings, never the grammatical form.** Today a masculine
-   "fatigué" can come back as "fatiguée" — partly because they're French homophones, but the
-   saved word should be *what the reader encountered*, not a silently re-inflected form. Keep
-   `correctedWord` scoped to phonetic misfire correction; do NOT normalize gender/number/tense.
-3. **`definition` must be English-only and spoken-friendly** — no source-language words in it.
-   Observed bug: "chansons" → "…plural of **chanson**…" and the en-US TTS mangles "chanson".
-   The foreign word is already pronounced correctly by the concurrent echo, so the spoken
-   definition never needs to contain it.
-4. **New `formNote` field** carries the morphology/lemma teaching as TEXT, shown but NEVER
-   spoken: e.g. "Past participle of *disparaître*", "Feminine of *fatigué*", null for a plain
-   word. This is the "the app does the dictionary detective work for you" value Benja wants —
-   you learn that *disparu* ← *disparaître* without having to already know it. (Chosen over
-   folding the lemma into `definition`, which would either lose the teaching or mangle the
-   lemma in speech.)
-
-**Where.**
-- `AnthropicService.swift`: prompt rewrite; `LookupResult` + `LookupJSON` gain `formNote: String?`;
-  `parseLookupResult` passes it through (normalize blank → nil, same as correctedWord).
-- `Word` schema: add `formNote: String?`. **If V3 is still unreleased when this is picked up,
-  add the field to `CamuseanSchemaV3` directly** (it's additive/optional). If V3 has shipped,
-  it's a V3→V4 lightweight migration.
-- `SessionViewModel.lookup`: persist `formNote` on the saved Word; speak ONLY `definition`
-  (English) — never `formNote`.
-- UI: a small secondary line under the definition on the reading result card
-  (`ReadingSessionView`) and the Review flashcard back (`ReviewView`).
-- Tests: extend `AnthropicServiceParsingTests` for `formNote` (present / absent / blank).
-
-**When to revisit.** Right after the book-spine steps (4 barcode scan, 5 session integration,
-6 Library grouping) are in. High priority — it's affecting Benja's daily reading experience now.
