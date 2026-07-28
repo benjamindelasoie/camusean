@@ -4,7 +4,12 @@ import SwiftData
 // Loads the app's ModelContainer and exposes a destructive reset path so the
 // UI can recover from a corrupt store instead of crashing on launch.
 enum ModelContainerLoader {
-    private static let schema = Schema(versionedSchema: CamuseanSchemaV3.self)
+    // MUST track the newest schema version, and must be bumped in the SAME commit that adds one.
+    // The `Word`/`Book` typealiases point at the current version, so leaving this on an older
+    // version builds a container whose entities don't match the models the app actually uses:
+    // the new migration stage never runs and SwiftData traps. Bump this, the typealiases, and
+    // CamuseanMigrationPlan.schemas/stages together.
+    private static let schema = Schema(versionedSchema: CamuseanSchemaV4.self)
 
     static let configuration = ModelConfiguration(
         schema: schema,

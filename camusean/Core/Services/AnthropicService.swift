@@ -1,16 +1,22 @@
 import Foundation
 
 struct LookupResult {
+    /// Target-language only, and safe to speak. The prompt forbids source-language text here
+    /// because a target-language TTS voice mispronounces it — see `formNote`.
     let definition: String
     let exampleSentence: String
     /// The word Claude believes the reader actually intended, when the speech transcription
     /// was likely a mishearing. `nil` means "no correction" — the transcription was kept as-is
     /// (either already a valid word, or the model returned the same/blank value).
     let correctedWord: String?
+    /// Morphology/lemma teaching for an inflected form ("Past participle of disparaître").
+    /// DISPLAYED, NEVER SPOKEN — it deliberately contains source-language words, which is
+    /// exactly why it must not reach TTS. `nil` when the word is its own dictionary form.
+    let formNote: String?
 }
 
-// Decodable shape of the model's JSON reply. `correctedWord` is optional so older/edge
-// responses that omit it still decode; it is normalized to `LookupResult.correctedWord` by
+// Decodable shape of the model's JSON reply. `correctedWord` and `formNote` are optional so
+// older/edge responses that omit them still decode; both are normalized by
 // `AnthropicService.parseLookupResult`.
 // `nonisolated` so its synthesized `Decodable` conformance is usable from the nonisolated
 // `parseLookupResult` (the module defaults types to @MainActor, which would isolate the
@@ -19,6 +25,7 @@ private nonisolated struct LookupJSON: Decodable {
     let definition: String
     let exampleSentence: String
     let correctedWord: String?
+    let formNote: String?
 }
 
 actor AnthropicService {
@@ -68,10 +75,19 @@ actor AnthropicService {
 
         Decide the most likely intended \(sourceLanguage) word or expression:
         - If "\(word)" is already a valid \(sourceLanguage) word or expression, keep it EXACTLY — even if a different word would fit the book's theme better. Only change it to fix a clear phonetic mishearing.
-        - Otherwise infer the most likely intended \(sourceLanguage) word or expression that SOUNDS like the transcription — not merely one related to the book.\(rejectedClause)
+        - Otherwise infer the most likely intended \(sourceLanguage) word or expression that SOUNDS like the transcription — not merely one related to the book.
+        - NEVER change the grammatical form. Preserve the exact gender, number, and tense that was said, even when another form sounds identical. The reader wants the form they actually met on the page, not its dictionary form. Correct sound, never grammar.\(rejectedClause)
 
-        Then define it in \(targetLanguage).\(bookClause) Reply with ONLY a JSON object, no markdown, no extra text. Replace each angle-bracket placeholder with a real value:
-        {"correctedWord": "<the intended \(sourceLanguage) word or expression>", "definition": "<short definition>", "exampleSentence": "<example sentence>"}
+        Then define it in \(targetLanguage).\(bookClause)
+
+        The definition is spoken aloud by a \(targetLanguage) text-to-speech voice, so:
+        - Write it ONLY in \(targetLanguage). It must contain no \(sourceLanguage) words at all — not even the word being defined, which the app already pronounces separately in a native voice. A \(targetLanguage) voice mangles \(sourceLanguage) words.
+        - Keep it short and natural to hear.
+
+        If the word is an inflected form, put the grammar lesson in "formNote" instead. That field is displayed on screen and never spoken, so it MAY contain \(sourceLanguage) words — give the form and its dictionary form, e.g. "Past participle of <infinitive>", "Feminine singular of <base adjective>", "Plural of <singular noun>". Use null when the word is already its dictionary form and there is nothing extra to teach.
+
+        Reply with ONLY a JSON object, no markdown, no extra text. Replace each angle-bracket placeholder with a real value:
+        {"correctedWord": "<the intended \(sourceLanguage) word or expression>", "definition": "<short \(targetLanguage)-only definition>", "formNote": "<grammar note, or null>", "exampleSentence": "<example sentence>"}
         """
 
         var request = URLRequest(url: endpoint)
@@ -83,7 +99,10 @@ actor AnthropicService {
 
         let body: [String: Any] = [
             "model": model,
-            "max_tokens": 256,
+            // Raised from 256 when `formNote` was added — a truncated reply is unparseable JSON,
+            // which surfaces to the reader as a failed lookup. This is a ceiling, not a target:
+            // replies stay short, so it costs nothing when unused.
+            "max_tokens": 384,
             "messages": [["role": "user", "content": prompt]]
         ]
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
@@ -133,8 +152,19 @@ actor AnthropicService {
         return LookupResult(
             definition: decoded.definition,
             exampleSentence: decoded.exampleSentence,
-            correctedWord: normalizeCorrection(decoded.correctedWord, original: original)
+            correctedWord: normalizeCorrection(decoded.correctedWord, original: original),
+            formNote: normalizeFormNote(decoded.formNote)
         )
+    }
+
+    // A form note only counts when it carries text. Blank, whitespace-only, or the literal
+    // string "null" (models sometimes emit that inside a JSON string rather than as a JSON
+    // null) all collapse to nil so the UI shows nothing rather than an empty line.
+    nonisolated static func normalizeFormNote(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed.lowercased() != "null" else { return nil }
+        return trimmed
     }
 
     // A correction only counts when it's non-blank AND actually differs from the transcription.

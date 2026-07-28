@@ -463,7 +463,7 @@ struct ReadingSessionView: View {
                     DotsView()
                 }
 
-            case .result(let word, let definition):
+            case .result(let word, let definition, let formNote):
                 VStack(spacing: 18) {
                     Text(word)
                         .font(.system(size: 40, weight: .bold, design: .serif))
@@ -474,11 +474,22 @@ struct ReadingSessionView: View {
                     Rectangle()
                         .fill(Color.camusean.opacity(0.45))
                         .frame(width: 30, height: 1.5)
-                    Text(definition)
-                        .font(.callout)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(5)
+                    VStack(spacing: 8) {
+                        Text(definition)
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(5)
+                        // The grammar lesson: where the form the reader met comes from. Read, never
+                        // heard — the spoken definition stays English-only on purpose.
+                        if let formNote {
+                            Text(formNote)
+                                .font(.footnote)
+                                .italic()
+                                .foregroundStyle(Color.camusean.opacity(0.75))
+                                .multilineTextAlignment(.center)
+                        }
+                    }
                 }
                 .transition(.scale(scale: 0.95).combined(with: .opacity))
 

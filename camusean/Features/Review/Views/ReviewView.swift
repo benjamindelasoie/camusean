@@ -269,6 +269,16 @@ struct ReviewView: View {
                                         .foregroundStyle(.primary.opacity(0.85))
                                         .multilineTextAlignment(.center)
                                         .lineSpacing(4)
+                                    // Where this form comes from, e.g. "Past participle of
+                                    // disparaître". nil for words saved before v1.5 and for words
+                                    // that are already their own dictionary form.
+                                    if let formNote = word.formNote {
+                                        Text(formNote)
+                                            .font(.footnote)
+                                            .italic()
+                                            .foregroundStyle(Color.camusean.opacity(0.75))
+                                            .multilineTextAlignment(.center)
+                                    }
                                     if !word.exampleSentence.isEmpty {
                                         Text(word.exampleSentence)
                                             .font(.callout)

@@ -8,7 +8,9 @@ enum SessionPhase {
     case idle
     case listening
     case processing(String)
-    case result(String, String)  // word, definition
+    // word, definition, formNote. `formNote` is rendered on the result card but must never be
+    // handed to TTS — it deliberately contains source-language text (see LookupResult.formNote).
+    case result(String, String, String?)
     case error(String)
 }
 
@@ -164,7 +166,7 @@ final class SessionViewModel {
         let transcription: String? = currentOriginalTranscription ?? {
             if let w = currentWord { return w.word }
             if case .processing(let p) = phase { return p }
-            if case .result(let r, _) = phase { return r }
+            if case .result(let r, _, _) = phase { return r }
             return nil
         }()
 
@@ -191,7 +193,7 @@ final class SessionViewModel {
         case .idle: return "idle"
         case .listening: return "listening"
         case .processing(let w): return "processing(\(w))"
-        case .result(let w, _): return "result(\(w))"
+        case .result(let w, _, _): return "result(\(w))"
         case .error: return "error"
         }
     }
@@ -285,9 +287,14 @@ final class SessionViewModel {
                 print("[correction] heard=\"\(word)\" intended=\"\(intended)\" applied=\(wordCorrectionEnabled)")
             }
 
-            currentWord = saveWord(word: resolvedWord, definition: result.definition, example: result.exampleSentence)
+            currentWord = saveWord(
+                word: resolvedWord,
+                definition: result.definition,
+                example: result.exampleSentence,
+                formNote: result.formNote
+            )
             lookupCount += 1
-            phase = .result(resolvedWord, result.definition)
+            phase = .result(resolvedWord, result.definition, result.formNote)
 
             // If we corrected the word, the concurrent echo already spoke the *misheard* word.
             // Voice the authoritative corrected word (in the source locale) before the English
@@ -297,6 +304,9 @@ final class SessionViewModel {
                 if lookupCancelled { return }
             }
 
+            // Only the definition is spoken. `result.formNote` is deliberately NOT passed to TTS:
+            // it carries source-language text (a lemma or infinitive), and the en-US voice mangles
+            // those — the exact bug that motivated splitting it out of `definition`.
             await tts.speak(result.definition, language: "en-US")
             if lookupCancelled { return }
 
@@ -335,7 +345,7 @@ final class SessionViewModel {
 #endif
 
     @discardableResult
-    private func saveWord(word: String, definition: String, example: String) -> Word? {
+    private func saveWord(word: String, definition: String, example: String, formNote: String? = nil) -> Word? {
         guard let context = modelContext else { return nil }
         let entry = Word(
             word: word,
@@ -343,7 +353,8 @@ final class SessionViewModel {
             exampleSentence: example,
             sourceLanguage: sourceName,
             targetLanguage: targetName,
-            book: activeBook
+            book: activeBook,
+            formNote: formNote
         )
         context.insert(entry)
         try? context.save()

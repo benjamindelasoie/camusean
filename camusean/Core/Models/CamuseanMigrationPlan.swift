@@ -36,12 +36,25 @@ enum CamuseanSchemaV1: VersionedSchema {
 
 enum CamuseanMigrationPlan: SchemaMigrationPlan {
     static var schemas: [any VersionedSchema.Type] {
-        [CamuseanSchemaV1.self, CamuseanSchemaV2.self, CamuseanSchemaV3.self]
+        [CamuseanSchemaV1.self, CamuseanSchemaV2.self, CamuseanSchemaV3.self, CamuseanSchemaV4.self]
     }
 
     static var stages: [MigrationStage] {
-        [migrateV1toV2, migrateV2toV3]
+        [migrateV1toV2, migrateV2toV3, migrateV3toV4]
     }
+
+    // V3 -> V4: adds the optional `Word.formNote`. Additive with a property-level default, so it
+    // is lightweight with no mapping closure — existing rows simply get nil and display no form
+    // note, which is the same as a word that teaches nothing extra.
+    //
+    // V3 shipped to a real device with real rows, so `formNote` could NOT be added to V3 in place;
+    // that would mutate a schema version already on disk and risks the same class of failure as
+    // the v1.1 `easeFactor` crash ("missing attribute values on mandatory destination attribute").
+    // Any future persisted field needs its own version + stage for the same reason.
+    static let migrateV3toV4 = MigrationStage.lightweight(
+        fromVersion: CamuseanSchemaV3.self,
+        toVersion: CamuseanSchemaV4.self
+    )
 
     // V2 -> V3: purely additive (new optional `Word.book`/`Word.originalTranscription` and the new
     // `Book` entity), so this is a lightweight stage with no mapping closure. Do NOT model it on

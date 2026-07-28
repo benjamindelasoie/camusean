@@ -9,7 +9,9 @@ import SwiftData
     // Build an in-memory container so we can exercise modelContext.delete without driving
     // a real ModelContainer file. Each test gets its own container.
     private func makeContext() -> ModelContext {
-        let schema = Schema(versionedSchema: CamuseanSchemaV3.self)
+        // Must match the version the `Word` typealias points at — inserting a current-version
+        // model into an older-version container traps inside SwiftData.
+        let schema = Schema(versionedSchema: CamuseanSchemaV4.self)
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         let container = try! ModelContainer(for: schema, configurations: [config])
         return ModelContext(container)
@@ -30,7 +32,7 @@ import SwiftData
         context.insert(word)
         try? context.save()
         vm.currentWord = word
-        vm.phase = .result("bonjour", "hello")
+        vm.phase = .result("bonjour", "hello", nil)
 
         vm.cancelCurrentLookup()
 

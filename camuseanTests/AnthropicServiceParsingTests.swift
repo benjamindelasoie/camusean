@@ -77,6 +77,56 @@ import Testing
         }
     }
 
+    // MARK: formNote
+
+    @Test func parsesFormNoteWhenPresent() throws {
+        let json = #"{"correctedWord": "disparu", "definition": "gone or vanished", "formNote": "Past participle of disparaître", "exampleSentence": "Il a disparu."}"#
+        let r = try AnthropicService.parseLookupResult(from: json, original: "disparu")
+        #expect(r.formNote == "Past participle of disparaître")
+    }
+
+    @Test func absentFormNoteFieldDecodesToNil() throws {
+        // A plain dictionary-form word teaches nothing extra, and older replies omit the key.
+        let json = #"{"correctedWord": "livre", "definition": "book", "exampleSentence": "Un livre."}"#
+        let r = try AnthropicService.parseLookupResult(from: json, original: "livre")
+        #expect(r.formNote == nil)
+    }
+
+    @Test func jsonNullFormNoteDecodesToNil() throws {
+        let json = #"{"definition": "book", "formNote": null, "exampleSentence": "Un livre."}"#
+        let r = try AnthropicService.parseLookupResult(from: json, original: "livre")
+        #expect(r.formNote == nil)
+    }
+
+    @Test func blankFormNoteCollapsesToNil() throws {
+        let json = #"{"definition": "book", "formNote": "   ", "exampleSentence": "Un livre."}"#
+        let r = try AnthropicService.parseLookupResult(from: json, original: "livre")
+        #expect(r.formNote == nil)
+    }
+
+    @Test func stringNullFormNoteCollapsesToNil() throws {
+        // Models sometimes emit the word "null" *inside* the string rather than a JSON null.
+        // Without this the reader would see a literal "null" under the definition.
+        let json = #"{"definition": "book", "formNote": "null", "exampleSentence": "Un livre."}"#
+        let r = try AnthropicService.parseLookupResult(from: json, original: "livre")
+        #expect(r.formNote == nil)
+    }
+
+    // MARK: normalizeFormNote
+
+    @Test func normalizeFormNoteTrimsAndKeepsText() {
+        #expect(AnthropicService.normalizeFormNote("  Feminine of fatigué  ") == "Feminine of fatigué")
+    }
+
+    @Test func normalizeFormNoteReturnsNilForEmptyish() {
+        #expect(AnthropicService.normalizeFormNote(nil) == nil)
+        #expect(AnthropicService.normalizeFormNote("") == nil)
+        #expect(AnthropicService.normalizeFormNote("   ") == nil)
+        #expect(AnthropicService.normalizeFormNote("null") == nil)
+        #expect(AnthropicService.normalizeFormNote("NULL") == nil)
+        #expect(AnthropicService.normalizeFormNote(" Null ") == nil)
+    }
+
     // MARK: normalizeCorrection
 
     @Test func normalizeKeepsDistinctTrimmedWord() {
