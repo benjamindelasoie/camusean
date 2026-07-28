@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Export options for App Store / TestFlight distribution.
+	  Used by scripts/archive-and-upload.sh; also selectable manually via
+	      xcodebuild -exportArchive -exportOptionsPlist appstore/ExportOptions.plist
+
+	  `destination` = export writes a signed .ipa to disk and stops. Change it to
+	  `upload` to have xcodebuild push straight to App Store Connect using the Apple
+	  ID already signed into Xcode — no API key or app-specific password needed. The
+	  script passes an override rather than editing this file, so exporting stays the
+	  safe default and uploading is always explicit.
+	-->
+	<key>method</key>
+	<string>app-store-connect</string>
+
+	<key>destination</key>
+	<string>export</string>
+
+	<key>teamID</key>
+	<string>LWQ9NP6HVT</string>
+
+	<!-- Let Xcode resolve the distribution certificate and provisioning profile. The
+	     project uses CODE_SIGN_STYLE = Automatic, so managing them by hand here would
+	     only introduce a second source of truth that can drift. -->
+	<key>signingStyle</key>
+	<string>automatic</string>
+
+	<!-- Bitcode is long dead; leaving it on produces a warning on every export. -->
+	<key>uploadBitcode</key>
+	<false/>
+
+	<!-- Symbols are what make TestFlight and Xcode Organizer crash reports readable.
+	     Worth uploading: this app has no crash reporter of its own. -->
+	<key>uploadSymbols</key>
+	<true/>
+
+	<!-- Strip Swift symbols from the shipped binary (they are still uploaded above). -->
+	<key>stripSwiftSymbols</key>
+	<true/>
+</dict>
+</plist>
