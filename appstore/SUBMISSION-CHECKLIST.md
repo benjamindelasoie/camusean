@@ -117,6 +117,22 @@ Everything in "Ready" plus:
 
 ---
 
+## Design checks (Guideline 4.0 / HIG)
+
+**Dark Mode — supported, verified 2026-07-28.** Rendered every screen on a simulator in
+dark appearance and audited the code: the flashcard and list surfaces use
+`Color(.systemBackground)` and `Color(.systemGray5/6)`, which adapt automatically, and
+every hardcoded `.white` is text sitting on the always-amber button, correct in both
+modes. Nothing is unreadable.
+
+**Dynamic Type — partial.** Body copy uses semantic fonts (`.callout`, `.footnote`,
+`.headline`) and scales correctly, which is the part that matters. But 38 call sites use
+fixed `.font(.system(size:))`, and only 3 pair it with `minimumScaleFactor`. Those are
+mostly display text — the app title, the big serif word on the result card — where a
+fixed size is a defensible design choice, and Apple does not reject for it. Worth
+revisiting for accessibility, not for approval: a reader using large text will see the
+headline stay put while everything around it grows.
+
 ## Known gaps, honestly
 
 - **The reading result card is missing from the screenshot set.** It is the app's best
