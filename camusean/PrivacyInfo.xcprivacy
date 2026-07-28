@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!--
+	  Camusean privacy manifest.
+
+	  Lives inside the synchronized source group so Xcode bundles it into the app
+	  automatically (see CLAUDE.md — camusean/ is a PBXFileSystemSynchronizedRootGroup).
+
+	  NSPrivacyCollectedDataTypes is intentionally EMPTY. Apple's guidance is that an
+	  app must not invent data-type or purpose values — Xcode fails to generate the
+	  privacy report if it sees unrecognized constants. The app's outbound data flows
+	  (see below) are declared instead in App Store Connect's privacy nutrition
+	  labels, which enumerate the approved categories in their own UI.
+
+	  Outbound data flows that the nutrition labels MUST cover, kept here so the two
+	  never drift apart:
+	    1. api.anthropic.com  — the recognized word/phrase, the source+target language
+	                            names, and (when a book session is active) the book
+	                            title, sent to get a definition. Not linked to identity;
+	                            there is no account, and no identifier is attached.
+	    2. openlibrary.org    — the scanned ISBN, sent to resolve book title/author/cover.
+	                            Not linked to identity.
+	  Neither flow is used for tracking, so NSPrivacyTracking stays false and
+	  NSPrivacyTrackingDomains stays empty. Adding any analytics or attribution SDK
+	  would invalidate both — revisit this file if that ever happens.
+	-->
+	<key>NSPrivacyTracking</key>
+	<false/>
+
+	<key>NSPrivacyTrackingDomains</key>
+	<array/>
+
+	<key>NSPrivacyCollectedDataTypes</key>
+	<array/>
+
+	<key>NSPrivacyAccessedAPITypes</key>
+	<array>
+		<dict>
+			<!--
+			  UserDefaults is a required-reason API. Camusean reads/writes only its own
+			  settings — sourceLanguageLocale, sourceLanguageName, targetLanguageName,
+			  wordCorrectionEnabled, plus the one-time voice-onboarding flag. (CLAUDE.md
+			  mandates UserDefaults.standard over @AppStorage, which clashes with
+			  @Observable at macro-expansion time, so these call sites are permanent.)
+
+			  CA92.1 = "read and write information that is only accessible to the app
+			  itself." Verified against Apple's current reason-code documentation on
+			  2026-07-27. NOT 1C8F.1 — that is for App Groups, and this app declares no
+			  app groups, no entitlements file, and ships no extensions.
+			-->
+			<key>NSPrivacyAccessedAPIType</key>
+			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+			<key>NSPrivacyAccessedAPITypeReasons</key>
+			<array>
+				<string>CA92.1</string>
+			</array>
+		</dict>
+	</array>
+</dict>
+</plist>

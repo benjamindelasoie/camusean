@@ -104,6 +104,7 @@
 			isa = PBXNativeTarget;
 			buildConfigurationList = 318B5B452FB593120046CC90 /* Build configuration list for PBXNativeTarget "camusean" */;
 			buildPhases = (
+				31C0FFEE0000000000000010 /* Guard: QA bridge stripped for Release */,
 				318B5B1E2FB593100046CC90 /* Sources */,
 				318B5B1F2FB593100046CC90 /* Frameworks */,
 				318B5B202FB593100046CC90 /* Resources */,
@@ -239,6 +240,30 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		31C0FFEE0000000000000010 /* Guard: QA bridge stripped for Release */ = {
+			isa = PBXShellScriptBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+				"$(SRCROOT)/scripts/verify-no-debug-bridge.sh",
+				"$(SRCROOT)/camusean.xcodeproj/project.pbxproj",
+			);
+			name = "Guard: QA bridge stripped for Release";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(DERIVED_FILE_DIR)/debugbridge-guard.stamp",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "\"$SRCROOT/scripts/verify-no-debug-bridge.sh\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		318B5B1E2FB593100046CC90 /* Sources */ = {
