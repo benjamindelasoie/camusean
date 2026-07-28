@@ -63,6 +63,24 @@ untested variable left is the key itself. Two things were fixed along the way:
 | Review notes | `review-notes.txt` — includes why the app asks for the camera |
 | Privacy labels / age rating | `privacy-labels-and-age-rating.md` |
 | Build number | 1.0 (3) — bumped so the upload is not a duplicate |
+| Device family | iPhone only (`TARGETED_DEVICE_FAMILY = 1`) — see below |
+| Distribution signing | verified: archive + export produce an .ipa signed `Apple Distribution: Benjamin Delasoie (LWQ9NP6HVT)` |
+
+### Why the app is now iPhone-only — reversible if you disagree
+
+It previously declared `TARGETED_DEVICE_FAMILY = "1,2"`, i.e. iPad support. Two
+consequences, and the first is a hard submission blocker:
+
+1. **App Store Connect requires 13-inch iPad screenshots** from any app that runs on
+   iPad. You could not have submitted without producing them.
+2. Running it on an iPad Pro 13" showed the iPhone layout stretched across the screen —
+   not broken, but vast dead space and a full-width primary button. That is the kind of
+   thing Guideline 4.0 is about.
+
+Since the product is explicitly phone-in-hand-while-holding-a-book, restricting to
+iPhone removes both problems. It is one setting; set it back to `"1,2"` and produce iPad
+screenshots if you ever want iPad users. The now-meaningless iPad orientation key was
+removed at the same time.
 
 ---
 

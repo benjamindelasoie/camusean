@@ -51,6 +51,16 @@ pass "version $MV, build $BV (App Store Connect rejects a re-used build number)"
 grep -q "ITSAppUsesNonExemptEncryption = NO" camusean.xcodeproj/project.pbxproj \
   && pass "export compliance declared (no upload prompt)" \
   || warn "ITSAppUsesNonExemptEncryption not set — you'll be asked at every upload"
+# Declaring iPad support silently adds a REQUIREMENT for 13" iPad screenshots, and
+# invites a reviewer to judge an iPhone layout stretched across an iPad (Guideline 4.0).
+DF=$(grep -m1 "TARGETED_DEVICE_FAMILY" camusean.xcodeproj/project.pbxproj | sed 's/.*= *//;s/;//;s/"//g')
+case "$DF" in
+    1)   pass "iPhone only — no iPad screenshot set required";;
+    *2*) block "TARGETED_DEVICE_FAMILY = $DF declares iPad support. App Store Connect
+             will then REQUIRE 13\" iPad screenshots, and the layout is iPhone-designed.
+             Set it to 1 unless you intend to support iPad properly.";;
+    *)   warn "unrecognised TARGETED_DEVICE_FAMILY = $DF";;
+esac
 
 echo ""
 echo "Privacy"
