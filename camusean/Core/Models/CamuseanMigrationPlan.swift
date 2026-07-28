@@ -4,7 +4,7 @@ import SwiftData
 // V1: the v1.0 schema. Snapshot of the old Word shape with no SRS fields.
 enum CamuseanSchemaV1: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(1, 0, 0) }
-    static var models: [any PersistentModel.Type] { [Word.self] }
+    static var models: [any PersistentModel.Type] { [Self.Word.self] }
 
     @Model
     final class Word {

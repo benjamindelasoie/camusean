@@ -1,11 +1,17 @@
 import Foundation
 import SwiftData
 
+// Each version's `models` array qualifies its entries with `Self.` on purpose. A bare `Word.self`
+// inside these enums does resolve to the nested type (an inner declaration shadows the file-scope
+// typealias), but the two names are only one scoping rule apart, and a version that silently
+// listed the CURRENT `Word` would break its own migration. The explicit form is the documented
+// convention for exactly this ambiguity.
+
 // V2: the v1.1 schema (adds SM-2 SRS fields to V1). Kept as a frozen snapshot for the
 // migration plan; V3 below is the current schema (see the typealiases at the bottom).
 enum CamuseanSchemaV2: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
-    static var models: [any PersistentModel.Type] { [Word.self] }
+    static var models: [any PersistentModel.Type] { [Self.Word.self] }
 
     @Model
     final class Word {
@@ -53,7 +59,7 @@ enum CamuseanSchemaV2: VersionedSchema {
 // a schema version that already exists on disk. V4 below is the current schema.
 enum CamuseanSchemaV3: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(3, 0, 0) }
-    static var models: [any PersistentModel.Type] { [Word.self, Book.self] }
+    static var models: [any PersistentModel.Type] { [Self.Word.self, Self.Book.self] }
 
     @Model
     final class Word {
@@ -164,7 +170,7 @@ enum CamuseanSchemaV3: VersionedSchema {
 // here rather than reused from V3.
 enum CamuseanSchemaV4: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(4, 0, 0) }
-    static var models: [any PersistentModel.Type] { [Word.self, Book.self] }
+    static var models: [any PersistentModel.Type] { [Self.Word.self, Self.Book.self] }
 
     @Model
     final class Word {
