@@ -8,6 +8,9 @@ struct SettingsView: View {
     @AppStorage("wordCorrectionEnabled") private var wordCorrectionEnabled = true
 
     @State private var apiKey = ""
+    /// Whether the Keychain already holds a key — tracked separately because the masked
+    /// `apiKey` string is not visible in a SecureField (see `apiKeySection`).
+    @State private var hasStoredKey = false
     @State private var showAPIKey = false
     @State private var saveMessage = ""
     @State private var saveSuccess = false
@@ -93,6 +96,17 @@ struct SettingsView: View {
 
     private var apiKeySection: some View {
         Section {
+            // SwiftUI's SecureField does not render text it was given programmatically, so a
+            // stored key shows as a completely blank box — indistinguishable from "no key set".
+            // That matters beyond tidiness: App Review is told the dictionary is pre-configured,
+            // and a reviewer who opens Settings to an empty key field may reasonably conclude it
+            // is not, which is a Guideline 2.1 conversation nobody wants. State it in words.
+            if hasStoredKey {
+                Label("A key is already set up", systemImage: "checkmark.seal.fill")
+                    .font(.callout)
+                    .foregroundStyle(Color(red: 0.18, green: 0.62, blue: 0.40))
+            }
+
             HStack {
                 Label {
                     if showAPIKey {
@@ -144,7 +158,9 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            apiKey = KeychainService.loadAPIKey().map {
+            let stored = KeychainService.loadAPIKey()
+            hasStoredKey = !(stored ?? "").isEmpty
+            apiKey = stored.map {
                 String(repeating: "•", count: min($0.count, 20))
             } ?? ""
         }
@@ -193,6 +209,7 @@ struct SettingsView: View {
             try KeychainService.saveAPIKey(apiKey)
             saveMessage = "Key saved"
             saveSuccess = true
+            hasStoredKey = true
             apiKey = String(repeating: "•", count: min(apiKey.count, 20))
             showAPIKey = false
         } catch {

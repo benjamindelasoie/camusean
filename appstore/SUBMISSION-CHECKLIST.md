@@ -23,15 +23,27 @@ That fails **both** goals at once:
 **What to do (only you can — it is your Anthropic account):**
 
 1. Create a **capped, revocable** key at <https://console.anthropic.com> — set a low
-   monthly spend limit so a leaked key cannot run up a bill. The app also self-limits
-   to 200 lookups/day (`AnthropicService.dailyCap`).
-2. `cp Secrets.plist.example camusean/Secrets.plist`
-3. Paste the key over `REPLACE_WITH_CAPPED_KEY`.
-4. Rebuild. `camusean/Secrets.plist` is gitignored and never committed; it is bundled
-   into the app by the synchronized source group.
+   monthly spend limit. The key ships inside the app bundle, so treat it as semi-public:
+   anyone determined can extract it from the binary. The app also self-limits to 200
+   lookups/day (`AnthropicService.dailyCap`).
+2. `./scripts/set-api-key.sh sk-ant-...`
+3. Rebuild.
 
-Verify it worked by installing on a device that has never had the app, or by deleting
-the app first — Settings should already show a key without you typing one.
+Then confirm: **Settings should show a green "A key is already set up"** without you
+typing anything. `./scripts/set-api-key.sh --status` reports the file side of it.
+
+**The seeding path itself is already verified end-to-end** (2026-07-28) with a dummy
+key on a freshly erased simulator: `Secrets.plist` is bundled into the `.app`,
+`seedAPIKeyIfNeeded()` writes to the Keychain, and Settings reflects it. So the only
+untested variable left is the key itself. Two things were fixed along the way:
+
+- `seedAPIKeyIfNeeded()` used `try?`, which silently swallowed any Keychain failure —
+  meaning a broken seed was indistinguishable from "no key supplied". It now logs the
+  precise reason it bailed.
+- A stored key rendered as a **completely blank field**, because SwiftUI's `SecureField`
+  does not display text set programmatically. A reviewer told the service is
+  pre-configured, opening Settings to an empty key box, would reasonably conclude
+  otherwise. Hence the explicit status row.
 
 ---
 

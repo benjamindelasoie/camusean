@@ -44,14 +44,37 @@ enum KeychainService {
     /// No-op when a key already exists, the file is absent, or the value is still the
     /// placeholder — in those cases the app falls back to the normal manual-entry flow.
     static func seedAPIKeyIfNeeded() {
-        if let existing = loadAPIKey(), !existing.isEmpty { return }
-        guard
-            let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist"),
-            let dict = NSDictionary(contentsOf: url),
-            let key = dict["AnthropicAPIKey"] as? String,
-            key.hasPrefix("sk-ant-")
-        else { return }
-        try? saveAPIKey(key)
+        if let existing = loadAPIKey(), !existing.isEmpty {
+            print("[seed] key already present — nothing to do")
+            return
+        }
+        guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist") else {
+            // Expected for local dev builds; fatal for TestFlight/App Review, where the
+            // tester has no key of their own and the app looks broken without one.
+            print("[seed] no Secrets.plist in the bundle — falling back to manual entry")
+            return
+        }
+        guard let dict = NSDictionary(contentsOf: url) else {
+            print("[seed] Secrets.plist present but unreadable at \(url.lastPathComponent)")
+            return
+        }
+        guard let key = dict["AnthropicAPIKey"] as? String else {
+            print("[seed] Secrets.plist has no AnthropicAPIKey string")
+            return
+        }
+        guard key.hasPrefix("sk-ant-") else {
+            print("[seed] AnthropicAPIKey is still the placeholder — not seeding")
+            return
+        }
+        // Never `try?` this. A silent failure here is indistinguishable from "no key was
+        // provided", which is exactly the confusion that makes a TestFlight build look
+        // broken to a tester who cannot see any error.
+        do {
+            try saveAPIKey(key)
+            print("[seed] seeded API key into the Keychain")
+        } catch {
+            print("[seed] FAILED to write seeded key to the Keychain: \(error)")
+        }
     }
 
     static func deleteAPIKey() {
