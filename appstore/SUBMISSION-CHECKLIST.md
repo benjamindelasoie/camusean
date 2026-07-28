@@ -1,0 +1,104 @@
+# Camusean — submission checklist
+
+Status as of 2026-07-28. Two goals, and they are **not** the same path:
+
+- **Get your friend testing** → TestFlight. Does not require App Store approval,
+  screenshots, or finished store metadata. This is much closer than the full listing.
+- **Get on the App Store** → full App Review. Needs everything below.
+
+---
+
+## THE ONE BLOCKER FOR BOTH — a seeded API key
+
+`camusean/Secrets.plist` does not exist. Without it, `KeychainService.seedAPIKeyIfNeeded()`
+finds nothing, and anyone who is not you opens the app to a key wall in Settings and
+cannot look up a single word.
+
+That fails **both** goals at once:
+- Your friend downloads from TestFlight and the app does nothing.
+- App Review hits Guideline 2.1 (incomplete / functionality not accessible to the
+  reviewer) and rejects. Worse, `review-notes.txt` tells the reviewer the service is
+  pre-configured — being contradicted by the build is a bad way to start a review.
+
+**What to do (only you can — it is your Anthropic account):**
+
+1. Create a **capped, revocable** key at <https://console.anthropic.com> — set a low
+   monthly spend limit so a leaked key cannot run up a bill. The app also self-limits
+   to 200 lookups/day (`AnthropicService.dailyCap`).
+2. `cp Secrets.plist.example camusean/Secrets.plist`
+3. Paste the key over `REPLACE_WITH_CAPPED_KEY`.
+4. Rebuild. `camusean/Secrets.plist` is gitignored and never committed; it is bundled
+   into the app by the synchronized source group.
+
+Verify it worked by installing on a device that has never had the app, or by deleting
+the app first — Settings should already show a key without you typing one.
+
+---
+
+## Ready — nothing further needed
+
+| Item | State |
+|---|---|
+| Privacy manifest | `camusean/PrivacyInfo.xcprivacy`, verified bundled, reason CA92.1 |
+| Privacy policy (public) | <https://camusean.vercel.app/privacy.html> — live, no login wall |
+| Privacy policy (in-app) | Settings → About → Privacy Policy |
+| Support / Marketing URL | <https://camusean.vercel.app/> — live |
+| Export compliance | `ITSAppUsesNonExemptEncryption = NO` — no prompt at upload |
+| Usage descriptions | Microphone, Speech Recognition, Camera — all specific and feature-tied |
+| Debug harness | Release build fails if DebugBridge is linked (`scripts/verify-no-debug-bridge.sh`) |
+| Screenshots | `appstore/screenshots/` — 5 shots, 1320x2868 (6.9"), no alpha |
+| Store copy | `app-store-metadata.md` — name, subtitle, description, keywords, category |
+| Review notes | `review-notes.txt` — includes why the app asks for the camera |
+| Privacy labels / age rating | `privacy-labels-and-age-rating.md` |
+| Build number | 1.0 (3) — bumped so the upload is not a duplicate |
+
+---
+
+## Getting your friend on TestFlight (fastest path)
+
+1. Seed the API key (above) — otherwise this is pointless.
+2. Xcode → Product → Archive, then Distribute App → App Store Connect → Upload.
+3. Wait for processing (usually minutes; you get an email).
+4. **Internal testing — no review:** App Store Connect → Users and Access → add his
+   Apple ID → then TestFlight → Internal Testing → add him to the group. Up to 100
+   testers, available as soon as the build finishes processing.
+5. He installs TestFlight from the App Store and accepts the invite.
+
+External testing (public link, up to 10,000) needs Beta App Review and a "What to
+Test" note, but still needs no screenshots or store metadata. Only use it if you want
+testers who cannot be added to your team.
+
+---
+
+## Submitting to the App Store
+
+Everything in "Ready" plus:
+
+1. Seed the API key.
+2. Archive and upload (same as above).
+3. In App Store Connect fill in, from the files in this folder:
+   - Name, subtitle, description, keywords, category → `app-store-metadata.md`
+   - Screenshots → `appstore/screenshots/` under the **6.9"** display size
+   - Privacy nutrition labels → `privacy-labels-and-age-rating.md`
+   - Age rating questionnaire → same file
+   - App Review notes → `review-notes.txt`
+   - Privacy Policy URL, Support URL, Marketing URL → `app-store-metadata.md`
+4. Submit.
+
+---
+
+## Known gaps, honestly
+
+- **The reading result card is missing from the screenshot set.** It is the app's best
+  screen — the word, its definition, and the new grammar note — but capturing it needs
+  a live lookup, which needs the API key in the simulator. Once `Secrets.plist` exists,
+  re-run `./scripts/capture-screenshots.sh /tmp/camusean-container` and extend
+  `ScreenshotTests` to launch with `-qaWord bonjour` (the DEBUG mic-bypass hook) to get it.
+- **The screenshots contain your real vocabulary** — 29 words and three Camus titles
+  pulled from your device. Nothing sensitive, and it reads as an authentic product, but
+  look them over before making them public.
+- **No App Preview video.** Optional, but `demo-video-shotlist.md` already plans one,
+  and for a voice-first app that a reviewer may test in a silent room it is genuinely
+  persuasive. Consider it if the first submission is rejected under 4.3.
+- **The previous rejection was code-50** (the QA bridge shipping in the app target).
+  That specific failure is now structurally prevented, not just fixed.

@@ -1,28 +1,61 @@
 CAMUSEAN — APP REVIEW NOTES
 (Paste into App Store Connect → [your build] → App Review Information → Notes. Max 4000 chars.)
 
-Camusean is a hands-free reading companion: while reading a physical book in a
+Camusean is a hands-free reading companion. While reading a physical book in a
 foreign language, you speak an unknown word aloud and instantly hear its
 definition spoken back, then review saved words as flashcards later. The voice
 lookup is the core, differentiating feature — please test it directly.
 
-No account or login is required. Everything works on first launch (the
-dictionary service is pre-configured).
+No account or login is required. The dictionary service is pre-configured, so
+everything works on first launch with nothing to set up.
 
 IMPORTANT — the core feature is voice-based and must be tested on a PHYSICAL
 DEVICE. iOS speech recognition does not run in the Simulator, so on a Simulator
 the app will look like a simple flashcard app. On a real device it is a
 voice-driven lookup tool. To experience it:
 
-1. Open the app → "Read" tab → tap "Start Session".
+1. Open the app -> "Read" tab -> tap "Begin Reading".
 2. When prompted, allow Microphone and Speech Recognition.
 3. Hold the push-to-talk button and say a French word aloud,
-   e.g. "bibliothèque" or "flâneur".
+   e.g. "bibliotheque" or "flaneur".
 4. Release. Within about one second you will HEAR the English definition
    spoken aloud, see it on screen, and the word is saved automatically.
 5. Open the "Review" tab to study saved words as flashcards (swipe left = known).
 
-Default reading language is French; it can be changed in Settings.
+Default reading language is French. It can be changed in Settings, which also
+offers English, Spanish, Italian, German and Portuguese.
+
+WHY THE APP ASKS FOR THE CAMERA
+You can optionally attach a book to a reading session, so saved words are grouped
+by the book you met them in and definitions pick the sense that fits that book.
+On the "Read" start screen, the selector above "Begin Reading" offers
+"Add a book...", which lets you type the title by hand OR tap
+"Scan a barcode instead".
+
+Scanning is the ONLY use of the camera. It reads the ISBN barcode entirely
+on-device via VisionKit, saves no photo or video, and transmits no image
+anywhere. Only the resulting ISBN number is sent to Open Library
+(openlibrary.org, the Internet Archive's free book catalogue) to look up the
+title, author and cover art.
+
+The camera is entirely optional in two senses: adding a book accepts typed
+details instead, and the app's core voice lookup works fully without ever adding
+a book (choose "Free reading").
+
+WHAT THE SECOND LINE UNDER A DEFINITION IS
+When you say an inflected word, the result card shows a short grammar note under
+the definition, e.g. "Past participle of disparaitre". It is displayed but
+deliberately never spoken aloud: the spoken definition is English-only so the
+English text-to-speech voice does not mispronounce foreign words.
+
+PRIVACY
+No account, no advertising, no analytics, no tracking. Saved words and books live
+only on the device and are never uploaded. There are exactly two outbound
+requests, neither tied to any identity:
+  1. The recognized word or phrase, your selected languages, and the book title
+     if you picked one -> Anthropic's Claude API, which returns the definition.
+  2. A scanned or typed ISBN -> Open Library, which returns title/author/cover.
+Full policy: https://camusean.vercel.app/privacy.html
 
 This is a single, original app built by one independent developer — not a
 template, reskin, or clone. The concept (speak-a-word-aloud-while-reading) and

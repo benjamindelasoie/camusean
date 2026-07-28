@@ -72,8 +72,13 @@ name or words already in the title/subtitle, which Apple ignores anyway.)
 
 ---
 
-## What's New  (field: Version release notes — for the resubmission build)
-> New app icon and visual polish. Faster spoken-word-to-definition lookup.
+## What's New  (field: Version release notes)
+Not required for a first release — App Store Connect only asks for release notes on
+updates, and Camusean 1.0 has never been approved. Kept here for the first update:
+
+> Attach a book to a reading session by scanning its barcode, and see your saved
+> words grouped by the book you met them in. Definitions now pick the sense that
+> fits what you're reading, and inflected words show where they come from.
 
 ---
 
