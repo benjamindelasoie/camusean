@@ -28,7 +28,7 @@
 <div class="wrap">
   <a class="back" href="index.html">← Camusean</a>
   <h1>Privacy Policy</h1>
-  <p class="eff">Effective June 4, 2026</p>
+  <p class="eff">Effective July 28, 2026</p>
 
   <p class="lead">Camusean is built to be private. There is no account to create,
     nothing to log in to, no advertising, and no analytics tracking you. This page
@@ -43,23 +43,56 @@
 
   <h2>Microphone and speech recognition</h2>
   <p>When you start a reading session and use push-to-talk, the app records audio
-    so it can recognize the word you spoke. Speech recognition is performed using
-    Apple's built-in Speech framework. Audio is captured only while you are holding
-    the talk button, and it is used solely to transcribe the word you said. The app
-    does not store your recordings.</p>
+    so it can recognize the word you spoke. Audio is captured only while you are
+    holding the talk button, it is used solely to transcribe what you said, and the
+    app does not store your recordings.</p>
+  <p>Recognition uses Apple's built-in speech frameworks. On iOS 26 and later this
+    runs entirely on your iPhone — the audio never leaves the device. On earlier
+    versions of iOS, the app asks Apple to transcribe on-device as well, but that is
+    only possible when your iPhone has already downloaded the offline assets for the
+    language you are reading. When it has not, Apple's Speech framework transcribes
+    the audio on Apple's servers, and Apple handles it under its own privacy policy
+    (<a href="https://www.apple.com/legal/privacy/">apple.com/legal/privacy</a>).
+    Either way, the recording is never sent to us and is never stored.</p>
 
   <h2>Word lookups</h2>
-  <p>To define a word, the recognized word and the languages you have selected are
-    sent over a secure connection to our dictionary provider, Anthropic (the Claude
-    API), which returns a definition and example sentence. These requests are not
-    tied to your identity — no account or personal information is attached. Anthropic
+  <p>To define a word, the app sends the following over a secure connection to our
+    dictionary provider, Anthropic (the Claude API):</p>
+  <ul>
+    <li>the word or short phrase that was recognized;</li>
+    <li>the languages you have selected to read from and translate into;</li>
+    <li>the title of the book you picked for the session, if you picked one — it is
+      used only to choose the most fitting sense of a word;</li>
+    <li>any words you rejected a moment earlier in the same session, so the app does
+      not offer you the same wrong guess twice.</li>
+  </ul>
+  <p>Anthropic returns a definition and example sentence. These requests are not tied
+    to your identity — no account or personal information is attached. Anthropic
     processes the request under its own terms and privacy policy
     (<a href="https://www.anthropic.com/legal/privacy">anthropic.com/legal/privacy</a>).</p>
 
+  <h2>Books, the camera, and Open Library</h2>
+  <p>You can attach a book to a reading session, either by typing its details or by
+    scanning the barcode on its back cover. If you scan, the camera is used only to
+    read the barcode. That happens entirely on your iPhone: no photo or video is
+    saved, and no image is ever transmitted anywhere.</p>
+  <p>To turn the barcode into a title and author, the app sends the book's ISBN to
+    Open Library, a free catalogue run by the Internet Archive. It may make up to
+    three requests: one to look up the edition, one to resolve the author's name, and
+    one to load the cover image shown on the confirmation screen. Open Library
+    therefore learns which book you are adding, along with your IP address, as any web
+    request would reveal. Nothing about you, your saved words, or your reading is sent
+    — only the ISBN. Open Library handles requests under its own privacy policy
+    (<a href="https://archive.org/about/terms.php">archive.org/about/terms.php</a>).
+    If you add a book by typing its details instead of scanning, no request is made
+    and the camera is never used.</p>
+
   <h2>Words you save</h2>
-  <p>The words you look up are saved on your device so you can review them as
-    flashcards. This data lives locally on your iPhone (via Apple's on-device
-    storage) and is not uploaded to us or to any server. Deleting the app removes it.</p>
+  <p>The words you look up, and the books you add, are saved on your device so you
+    can review them as flashcards and see which book you learned a word in. This data
+    lives locally on your iPhone (via Apple's on-device storage) and is not uploaded
+    to us or to any server. There is no account and no cloud sync. Deleting the app
+    removes it.</p>
 
   <h2>Children's privacy</h2>
   <p>Camusean is not directed at children under 13 and does not knowingly collect

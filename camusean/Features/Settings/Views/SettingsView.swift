@@ -19,6 +19,7 @@ struct SettingsView: View {
                 languageSection
                 voiceSection
                 apiKeySection
+                aboutSection
                 developerSection
             }
             .navigationTitle("Settings")
@@ -146,6 +147,25 @@ struct SettingsView: View {
             apiKey = KeychainService.loadAPIKey().map {
                 String(repeating: "•", count: min($0.count, 20))
             } ?? ""
+        }
+    }
+
+    // MARK: - About Section
+
+    // App Review guideline 5.1.2 expects the privacy policy to be reachable from inside the
+    // app, not just from the App Store listing. Pushed rather than linked out so it still
+    // works with no network.
+    private var aboutSection: some View {
+        Section {
+            NavigationLink {
+                PrivacyPolicyView()
+            } label: {
+                Label("Privacy Policy", systemImage: "hand.raised")
+            }
+        } header: {
+            Text("About")
+        } footer: {
+            Text("Camusean has no account and no cloud sync. Your saved words stay on this iPhone.")
         }
     }
 
