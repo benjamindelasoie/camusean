@@ -26,11 +26,11 @@ Two uses:
 0:00–0:03  Open on the Read tab. (Optional voice/caption: "Reading in French.")
            Book visible in hand.
 
-0:03–0:06  Tap "Start Session."
+0:03–0:06  Tap "Begin Reading."
 
-0:06–0:12  Hold the push-to-talk button and clearly say one word:
-           "flâneur"  (or "bibliothèque" — pick one that reads cleanly).
-           Release the button.
+0:06–0:12  The app is already listening — there is no button to hold. Clearly
+           say one word: "flâneur" (or "bibliothèque" — pick one that reads
+           cleanly), then pause.
 
 0:12–0:18  PAYOFF: the English definition is spoken aloud + appears on screen.
            Let it play fully — do not cut early. This is the whole pitch.
