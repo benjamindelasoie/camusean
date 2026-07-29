@@ -30,6 +30,24 @@ nonisolated struct ReadingLanguage: Identifiable, Hashable {
     static func named(locale: String) -> ReadingLanguage {
         all.first { $0.locale == locale } ?? all[0]
     }
+
+    /// Resolves a stored value to a BCP-47 locale, accepting either form.
+    ///
+    /// `Word.sourceLanguage` persists a DISPLAY NAME ("French"), not a locale — the field is
+    /// written from `SessionViewModel.sourceName`, which reads `sourceLanguageName` out of
+    /// UserDefaults. Anything handing that value to a locale-shaped API (speech synthesis,
+    /// recognition) silently gets no match and falls back to the device default. This maps it
+    /// back. Accepts a locale too, so callers do not have to know which they hold.
+    ///
+    /// Unknown values fall back to the reader's current language rather than to French, so a
+    /// word saved before a language switch does not get read aloud in the wrong accent.
+    static func locale(forName name: String) -> String {
+        if let byLocale = all.first(where: { $0.locale == name }) { return byLocale.locale }
+        if let byName = all.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+            return byName.locale
+        }
+        return UserDefaults.standard.string(forKey: "sourceLanguageLocale") ?? all[0].locale
+    }
 }
 
 // Which languages' audio quality matters right now, and whether good voices are installed.
