@@ -11,18 +11,38 @@ struct ReviewView: View {
     @State private var isRevealed = false
     @State private var dragOffset: CGFloat = 0
     @State private var showDeleteConfirm = false
+    @State private var lastGrade: GradeSnapshot?
+
+    @AppStorage("autoSpeakOnReveal") private var autoSpeakOnReveal = false
 
     // The big serif word. A fixed 48pt never moved with the reader's text-size setting;
     // @ScaledMetric keeps the design size at the default and scales it from there.
     @ScaledMetric(relativeTo: .largeTitle) private var cardWordSize: CGFloat = 48
 
+    /// What a grade overwrote, so undo can put it back exactly.
+    ///
+    /// Holds the word's identity rather than the word: after restoring, the deck is
+    /// recomputed and the card has to be found again by identity, not by position.
+    private struct GradeSnapshot {
+        let id: PersistentIdentifier
+        let interval: Int
+        let easeFactor: Double
+        let nextReviewDate: Date?
+        let gradeLabel: String
+    }
+
     // The deck shown to the user: words with no schedule yet (new) or due now.
     private var words: [Word] {
-        let now = Date()
-        return allWords.filter { word in
-            guard let nrd = word.nextReviewDate else { return true }
-            return nrd <= now
-        }
+        WordScheduleRules.dueDeck(from: allWords)
+    }
+
+    /// The card being reviewed, or nil when the deck is empty.
+    ///
+    /// Every mutation goes through this. Previously three call sites indexed `words` by hand
+    /// and only one of them checked the bounds first — an out-of-range crash waiting for the
+    /// deck and the index to disagree, which undo and a third grade button both make easier.
+    private var currentWord: Word? {
+        words.indices.contains(currentIndex) ? words[currentIndex] : nil
     }
 
     var body: some View {
@@ -38,6 +58,8 @@ struct ReviewView: View {
             }
             .navigationTitle("Review")
             .navigationBarTitleDisplayMode(.large)
+            // Speech must not outlive the screen that started it.
+            .onDisappear { stopCardSpeech() }
             .confirmationDialog(
                 "Delete this word?",
                 isPresented: $showDeleteConfirm,
@@ -66,45 +88,21 @@ struct ReviewView: View {
     // MARK: - Empty States
 
     private var emptyState: some View {
-        VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(Color(.systemGray6))
-                    .frame(width: 100, height: 100)
-                Image(systemName: "books.vertical")
-                    .font(.system(size: 38, weight: .light))
-                    .foregroundStyle(Color(.systemGray2))
-            }
-            VStack(spacing: 8) {
-                Text("No words yet")
-                    .font(.system(.title2, design: .serif).weight(.semibold))
-                Text("Start a reading session\nto build your vocabulary.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-            }
-        }
-        .padding(40)
+        EmptyStateView(
+            systemImage: "books.vertical",
+            title: "No words yet",
+            message: "Start a reading session\nto build your vocabulary."
+        )
     }
 
     private var allCaughtUp: some View {
-        VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(Color.camusean.opacity(0.10))
-                    .frame(width: 100, height: 100)
-                Image(systemName: "checkmark")
-                    .font(.system(size: 38, weight: .light))
-                    .foregroundStyle(Color.camuseanText)
-            }
-            VStack(spacing: 8) {
-                Text("All caught up")
-                    .font(.system(.title2, design: .serif).weight(.semibold))
-                Text("Come back tomorrow.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            }
+        EmptyStateView(
+            systemImage: "checkmark",
+            title: "All caught up",
+            message: "Come back tomorrow.",
+            tint: .camuseanText,
+            circleFill: Color.camusean.opacity(0.10)
+        ) {
             NavigationLink {
                 LibraryView()
             } label: {
@@ -117,7 +115,6 @@ struct ReviewView: View {
                     .contentShape(Rectangle())
             }
         }
-        .padding(40)
     }
 
     // MARK: - Card Stack
@@ -142,9 +139,9 @@ struct ReviewView: View {
                             .onChanged { dragOffset = $0.translation.width }
                             .onEnded { value in
                                 if value.translation.width > 100 {
-                                    swipeOut(direction: 1, action: markLearned)
+                                    swipeOut(direction: 1) { grade(.good) }
                                 } else if value.translation.width < -100 {
-                                    swipeOut(direction: -1, action: markRepeat)
+                                    swipeOut(direction: -1) { grade(.again) }
                                 } else {
                                     withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
                                         dragOffset = 0
@@ -152,15 +149,22 @@ struct ReviewView: View {
                                 }
                             }
                     )
-                    .accessibilityAction(named: "Mark learned") { markLearned() }
-                    .accessibilityAction(named: "Mark repeat") { markRepeat() }
+                    // VoiceOver cannot swipe-to-grade, so every grade is also a named action.
+                    .accessibilityAction(named: "Again") { grade(.again) }
+                    .accessibilityAction(named: "Good") { grade(.good) }
+                    .accessibilityAction(named: "Easy") { grade(.easy) }
+                    .accessibilityAction(named: "Hear word") { speakCurrentWord() }
             }
 
             Spacer()
 
-            actionArea
-                .padding(.horizontal, 28)
-                .padding(.bottom, 36)
+            VStack(spacing: 4) {
+                actionArea
+                undoBar
+            }
+            .animation(.easeInOut(duration: 0.2), value: lastGrade == nil)
+            .padding(.horizontal, 28)
+            .padding(.bottom, 24)
         }
     }
 
@@ -247,25 +251,33 @@ struct ReviewView: View {
 
     private func cardBody(for word: Word) -> some View {
                 VStack(spacing: 0) {
-                    Text(word.word)
-                        .font(.system(size: cardWordSize, weight: .bold, design: .serif))
-                        .minimumScaleFactor(0.4)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
+                    // Tap the word to hear it. A plain .onTapGesture here would fight the
+                    // card's parent DragGesture, so this is a Button — SwiftUI gives a button
+                    // priority over an ancestor drag, and VoiceOver gets a real control
+                    // instead of decorated text.
+                    Button { speak(word) } label: {
+                        HStack(spacing: 10) {
+                            Text(word.word)
+                                .font(.system(size: cardWordSize, weight: .bold, design: .serif))
+                                .minimumScaleFactor(0.4)
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                            Image(systemName: "speaker.wave.2")
+                                .font(.system(size: max(14, cardWordSize * 0.32)))
+                                .foregroundStyle(Color.camuseanText)
+                        }
                         .padding(.horizontal, 28)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel(word.word)
+                    .accessibilityHint("Hear it pronounced")
 
-                    Spacer().frame(height: 16)
+                    Spacer().frame(height: 12)
+
+                    cardStatusRow(for: word)
 
                     if !isRevealed {
-                        // Language tag
-                        Text(word.sourceLanguage.components(separatedBy: "-").first ?? word.sourceLanguage)
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(Color(.systemGray6))
-                            .clipShape(Capsule())
-
                         Spacer().frame(height: 32)
 
                         // Swipe direction hints — visible only while dragging
@@ -286,7 +298,10 @@ struct ReviewView: View {
                         }
                         .padding(.horizontal, 28)
                     } else {
-                        // Definition
+                        // Definition. The status pill needs clearance or the rule draws
+                        // straight through it.
+                        Spacer().frame(height: 16)
+
                         Rectangle()
                             .fill(Color.camusean.opacity(0.3))
                             .frame(height: 1.5)
@@ -349,6 +364,7 @@ struct ReviewView: View {
                     withAnimation(.spring(duration: 0.4, bounce: 0.1)) {
                         isRevealed = true
                     }
+                    if autoSpeakOnReveal { speakCurrentWord() }
                 } label: {
                     Text("Reveal definition")
                         .font(.body.weight(.semibold))
@@ -361,37 +377,60 @@ struct ReviewView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
             } else {
-                HStack(spacing: 12) {
-                    reviewButton(
-                        label: "Repeat",
-                        icon: "arrow.clockwise",
-                        fg: Color.camuseanRepeat,
-                        action: markRepeat
-                    )
-                    reviewButton(
-                        label: "Learned",
-                        icon: "checkmark",
-                        fg: Color.camuseanSuccess,
-                        action: markLearned
-                    )
+                // Three grades, not two. Easy (q=5) is the only one that raises an ease
+                // factor — without it the deck could only ever get stricter.
+                HStack(spacing: 8) {
+                    ForEach(ReviewGrade.allCases) { g in
+                        reviewButton(grade: g)
+                    }
                 }
             }
         }
     }
 
-    private func reviewButton(label: String, icon: String, fg: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) {
+    private func reviewButton(grade g: ReviewGrade) -> some View {
+        // Three visually distinct tints. Again and Good were both in the amber family and
+        // read as the same button at a glance — which is the one mistake a grading row
+        // cannot afford, since the two mean opposite things to the scheduler.
+        let tint: Color = switch g {
+        case .again: .camuseanRepeat        // burnt orange — the lapse
+        case .good:  .primary               // neutral — the ordinary answer
+        case .easy:  .camuseanSuccess       // green — the only one that raises ease
+        }
+        return Button { grade(g) } label: {
             VStack(spacing: 8) {
-                Image(systemName: icon)
+                Image(systemName: g.systemImage)
                     .font(.system(size: 20, weight: .semibold))
-                Text(label)
+                Text(g.label)
                     .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 16)
-            .foregroundStyle(fg)
-            .background(fg.opacity(0.12))
+            .foregroundStyle(tint)
+            .background(tint.opacity(0.12))
             .clipShape(RoundedRectangle(cornerRadius: 16))
+        }
+        .accessibilityLabel(g.label)
+        .accessibilityHint(g.isLapse ? "Shows this word again tomorrow" : "Schedules this word further out")
+    }
+
+    /// Shown briefly after a grade so a mis-swipe is recoverable.
+    @ViewBuilder
+    private var undoBar: some View {
+        if let snapshot = lastGrade {
+            Button { undoLastGrade() } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.uturn.backward")
+                    Text("Undo \(snapshot.gradeLabel.lowercased())")
+                }
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(Color.camuseanText)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .transition(.opacity)
         }
     }
 
@@ -407,24 +446,58 @@ struct ReviewView: View {
         }
     }
 
-    private func markLearned() {
-        SRSScheduler.schedule(word: words[currentIndex], quality: 4)
+    // MARK: - Grading
+
+    private func grade(_ grade: ReviewGrade) {
+        guard let word = currentWord else { return }
+        // Snapshot before mutating so undo can restore the exact prior schedule.
+        lastGrade = GradeSnapshot(
+            id: word.persistentModelID,
+            interval: word.interval,
+            easeFactor: word.easeFactor,
+            nextReviewDate: word.nextReviewDate,
+            gradeLabel: grade.label
+        )
+        stopCardSpeech()
+        SRSScheduler.schedule(word: word, quality: grade.quality)
         try? modelContext.save()
-        // Filter recomputes; the scheduled-future row drops, next due card slides into currentIndex.
+        // The deck is a filter, not a stored list: the freshly scheduled word drops out and
+        // the next due card slides into the same index. currentIndex deliberately does not
+        // advance — see `undoLastGrade` for why that matters.
         resetCardState()
     }
 
-    private func markRepeat() {
-        SRSScheduler.schedule(word: words[currentIndex], quality: 2)
+    /// Puts the last graded word back and returns to it.
+    ///
+    /// Restoring alone is not enough. `allWords` is sorted by `timestamp`, so the word
+    /// re-enters the deck at its chronological position, which can be *before* the current
+    /// index — every later card shifts by one and `currentIndex` silently points at a
+    /// different word. Seeking by identity is what makes undo land on the card you undid.
+    private func undoLastGrade() {
+        guard let snapshot = lastGrade,
+              let word = allWords.first(where: { $0.persistentModelID == snapshot.id })
+        else { return }
+
+        stopCardSpeech()
+        word.interval = snapshot.interval
+        word.easeFactor = snapshot.easeFactor
+        word.nextReviewDate = snapshot.nextReviewDate
         try? modelContext.save()
-        // SM-2 lapse pushes nextReviewDate to tomorrow; row drops from today's deck.
+
+        // Deck has been recomputed by the mutation above; find the restored card by identity.
+        if let restored = words.firstIndex(where: { $0.persistentModelID == snapshot.id }) {
+            currentIndex = restored
+        }
+        lastGrade = nil   // one level of undo; a second press must no-op, not corrupt state
         resetCardState()
     }
 
     // Reached only through the confirmation dialog — see the card's "×" button.
     private func deleteCurrentWord() {
-        guard currentIndex < words.count else { return }
-        modelContext.delete(words[currentIndex])
+        guard let word = currentWord else { return }
+        stopCardSpeech()
+        modelContext.delete(word)
+        lastGrade = nil   // the snapshot's word no longer exists
         // Row removed entirely; the next due card slides into currentIndex.
         resetCardState()
     }
@@ -432,6 +505,86 @@ struct ReviewView: View {
     private func resetCardState() {
         dragOffset = 0
         isRevealed = false
+    }
+
+    // MARK: - Card status
+
+    /// Where the word came from and how well it is known — both derived from data the app
+    /// already stores, so neither costs a schema change.
+    @ViewBuilder
+    private func cardStatusRow(for word: Word) -> some View {
+        let progress = WordScheduleRules.progress(for: word)
+        let provenance = word.book.map { "From \($0.title). " } ?? ""
+        HStack(spacing: 8) {
+            if let title = word.book?.title {
+                Label(title, systemImage: "book.closed")
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            statusPill(progress)
+        }
+        .font(.caption2.weight(.medium))
+        .foregroundStyle(.secondary)
+        .padding(.horizontal, 28)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(provenance + statusText(progress))
+    }
+
+    private func statusPill(_ progress: WordProgress) -> some View {
+        let tint: Color = switch progress {
+        case .new: .camuseanText
+        case .struggling: .camuseanRepeat
+        case .learning: .secondary
+        case .mature: .camuseanSuccess
+        }
+        return Text(statusText(progress))
+            .foregroundStyle(tint)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(tint.opacity(0.12))
+            .clipShape(Capsule())
+    }
+
+    private func statusText(_ progress: WordProgress) -> String {
+        switch progress {
+        case .new: return "New"
+        case .struggling: return "Struggling"
+        case .learning(let days): return days == 1 ? "1 day" : "\(days) days"
+        case .mature(let days): return "\(days) days"
+        }
+    }
+
+    // MARK: - Audio
+
+    /// Speaks the current word in the language it was read in.
+    ///
+    /// The locale has to be resolved, not read. `Word.sourceLanguage` stores a display NAME
+    /// ("French"), not a BCP-47 tag — `SessionViewModel.sourceName` reads it out of
+    /// UserDefaults and `saveWord` persists it verbatim. Passing it straight to
+    /// `TTSService.speak(language:)` matches nothing (`bestVoice` compares the first two
+    /// characters, and "Fr" never matches "fr-FR"), the fallback voice constructor returns
+    /// nil, and the synthesizer falls back to the device default — a French word read aloud
+    /// by an English voice. See the TODOS entry for the underlying field fix.
+    private func speak(_ word: Word) {
+        let locale = ReadingLanguage.locale(forName: word.sourceLanguage)
+        Task { @MainActor in
+            // performPlayback suspends capture if a reading session is live and hands the
+            // microphone back afterwards, so this is safe from either tab.
+            await AudioSessionManager.shared.performPlayback {
+                await TTSService.shared.speak(word.word, language: locale)
+            }
+        }
+    }
+
+    private func speakCurrentWord() {
+        guard let word = currentWord else { return }
+        speak(word)
+    }
+
+    /// Speech must not outlive the card that started it — grading, undo, delete, and leaving
+    /// the screen all cut it off, otherwise the previous word talks over the next one.
+    private func stopCardSpeech() {
+        TTSService.shared.stopSpeaking()
     }
 }
 

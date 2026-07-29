@@ -6,6 +6,7 @@ struct SettingsView: View {
     @AppStorage("targetLanguageName") private var targetLanguageName = "English"
     @AppStorage("showSessionDebugOverlay") private var showSessionDebugOverlay = false
     @AppStorage("wordCorrectionEnabled") private var wordCorrectionEnabled = true
+    @AppStorage("autoSpeakOnReveal") private var autoSpeakOnReveal = false
 
     @State private var apiKey = ""
     /// Whether the Keychain already holds a key — tracked separately because the masked
@@ -62,12 +63,21 @@ struct SettingsView: View {
             Toggle(isOn: $wordCorrectionEnabled) {
                 Label("Correct misheard words", systemImage: "wand.and.sparkles")
             }
+
+            // Off by default. Hearing a word is useful; having a phone start talking the
+            // instant you flip a card is not something to opt people into silently, and
+            // reviewing happens in places where that matters.
+            Toggle(isOn: $autoSpeakOnReveal) {
+                Label("Speak words on reveal", systemImage: "speaker.wave.2")
+            }
         } header: {
             Text("Language")
         } footer: {
             Text("Words spoken in this language will be transcribed and defined in English. "
                  + "Correcting misheard words lets the dictionary fix likely speech-recognition "
-                 + "misfires before defining; turn it off to keep the exact transcription.")
+                 + "misfires before defining; turn it off to keep the exact transcription. "
+                 + "Speaking on reveal plays the word aloud when you flip a flashcard \u{2014} you can "
+                 + "always tap a word to hear it.")
         }
     }
 
