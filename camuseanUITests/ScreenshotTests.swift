@@ -56,11 +56,24 @@ final class ScreenshotTests: XCTestCase {
             attach(app, named: "04-settings")
 
             // 4 — The in-app privacy policy (guideline 5.1.2 evidence as well as a shot).
+            //
+            // Scroll first. The About section sits below the fold once Settings grows, and
+            // `waitForExistence` returns false for a row that far down — which silently
+            // dropped this screenshot from the set rather than failing the run. Guideline
+            // 5.1.2 evidence going missing quietly is exactly the failure worth guarding.
+            // Scroll until it is reachable. A fixed number of swipes is not enough at
+            // accessibility text sizes, where the Settings form is several screens long.
             let privacy = app.buttons["Privacy Policy"]
-            if privacy.waitForExistence(timeout: 5) {
-                privacy.tap()
-                attach(app, named: "05-privacy")
+            var swipes = 0
+            while !privacy.exists && swipes < 8 {
+                app.swipeUp()
+                swipes += 1
             }
+            XCTAssertTrue(privacy.waitForExistence(timeout: 5),
+                          "Privacy Policy row not reachable after \(swipes) swipes — "
+                          + "the guideline 5.1.2 screenshot would be missing from the set.")
+            privacy.tap()
+            attach(app, named: "05-privacy")
         }
     }
 
