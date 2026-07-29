@@ -114,6 +114,12 @@ final class SessionViewModel {
         isSessionActive = true
         lookupCount = 0
         UIApplication.shared.isIdleTimerDisabled = true
+        // A phone call or Siri tears the audio session out from under the recognizer. Without
+        // this the UI keeps showing "listening" over a dead engine.
+        AudioSessionManager.shared.onInterruption = { [weak self] in
+            guard let self, self.isSessionActive else { return }
+            self.endSession()
+        }
 
         listeningTask = Task {
             while !Task.isCancelled {
@@ -147,6 +153,7 @@ final class SessionViewModel {
         listeningTask?.cancel()
         listeningTask = nil
         speechService.reset()
+        AudioSessionManager.shared.onInterruption = nil
         AudioSessionManager.shared.deactivate()
         tts.stopSpeaking()
         UIApplication.shared.isIdleTimerDisabled = false
