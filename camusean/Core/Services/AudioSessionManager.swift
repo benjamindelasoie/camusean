@@ -30,9 +30,26 @@ final class AudioSessionManager {
         case playback
     }
 
+    // Audio bugs are device-only and silent — a clobbered category stops recognition with
+    // no error, which is indistinguishable from "the user didn't say anything". Every
+    // transition is traced so the failure is observable rather than inferred.
+    //
+    // Plain `print`, matching the `[correction]` / `[lookup]` / `[seed]` convention already
+    // used across the app, so it lands on stdout where
+    // `devicectl device process launch --console` can capture it. `Logger` would be tidier
+    // but writes to the unified log, which needs root to pull off a device.
+    //
+    // Not `#if DEBUG`, for the same reason the session debug overlay isn't: a TestFlight
+    // report of "it stopped hearing me" is undiagnosable without it.
+
     /// What the shared session is configured for right now. Read-only to callers — the whole
     /// point is that nobody outside this type sets a category.
-    private(set) var mode: Mode = .idle
+    private(set) var mode: Mode = .idle {
+        didSet {
+            guard oldValue != mode else { return }
+            print("[audio] mode \(oldValue.rawValue) -> \(mode.rawValue)")
+        }
+    }
 
     /// True while something owns the microphone. Consulted by UI that needs to know whether a
     /// reading session is live.
@@ -52,6 +69,7 @@ final class AudioSessionManager {
             let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt
             Task { @MainActor in
                 guard let self, let raw, raw == AVAudioSession.InterruptionType.began.rawValue else { return }
+                print("[audio] interruption began — ending audio")
                 self.mode = .idle
                 self.onInterruption?()
             }
@@ -63,7 +81,10 @@ final class AudioSessionManager {
     /// Claim the microphone. Idempotent: the recognizers call this at the top of every listen
     /// cycle, so it must be cheap and safe to repeat.
     func activateForRecording() throws {
-        guard mode != .recording else { return }
+        guard mode != .recording else {
+            print("[audio] activateForRecording: already recording, no-op")
+            return
+        }
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker])
         try session.setActive(true)
@@ -79,6 +100,7 @@ final class AudioSessionManager {
     /// suspends capture for the duration and hands the microphone back afterwards.
     func performPlayback(_ body: () async -> Void) async {
         let previous = mode
+        print("[audio] performPlayback begin (was \(previous.rawValue))")
         try? activateForPlayback()
         await body()
         switch previous {
@@ -89,6 +111,7 @@ final class AudioSessionManager {
         case .playback:
             break
         }
+        print("[audio] performPlayback end (restored \(mode.rawValue))")
     }
 
     /// Prefer `performPlayback`. Exposed for the reading session's lookup flow, which holds
