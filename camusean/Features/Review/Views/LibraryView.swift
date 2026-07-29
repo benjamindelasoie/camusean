@@ -10,92 +10,35 @@ struct LibraryView: View {
     @State private var searchText: String = ""
     @State private var selectedWord: Word?
 
-    // Display type on the detail sheet — scales with the reader's text-size setting.
-    @ScaledMetric(relativeTo: .largeTitle) private var detailWordSize: CGFloat = 36
-
-    enum LibraryFilter: String, CaseIterable, Identifiable {
-        case all = "All"
-        case due = "Due"
-        case scheduled = "Scheduled"
-        var id: String { rawValue }
-    }
-
-    enum LibrarySortMode: String, CaseIterable, Identifiable {
-        case dateAdded = "Date added"
-        case alphabetical = "Alphabetical"
-        var id: String { rawValue }
-    }
-
-    // MARK: - Derived data
-
-    // TODO: switch to dynamic @Query if any user's library exceeds ~5k words. See TODOS.md.
-    private var filteredWords: [Word] {
-        let now = Date()
-        var result = allWords
-
-        if !searchText.isEmpty {
-            result = result.filter { $0.word.localizedCaseInsensitiveContains(searchText) }
-        }
-
-        switch filter {
-        case .all:
-            break
-        case .due:
-            result = result.filter { word in
-                guard let nrd = word.nextReviewDate else { return true }
-                return nrd <= now
-            }
-        case .scheduled:
-            result = result.filter { word in
-                guard let nrd = word.nextReviewDate else { return false }
-                return nrd > now
-            }
-        }
-
-        switch sortMode {
-        case .dateAdded:
-            result.sort { $0.timestamp > $1.timestamp }
-        case .alphabetical:
-            result.sort { $0.word.localizedCompare($1.word) == .orderedAscending }
-        }
-
-        return result
-    }
-
-    private var stats: (total: Int, dueThisWeek: Int, learnedThisWeek: Int) {
-        let now = Date()
-        let cal = Calendar.current
-        let startOfWeek = cal.dateInterval(of: .weekOfYear, for: now)?.start ?? now
-        let endOfWeek = cal.date(byAdding: .day, value: 7, to: startOfWeek) ?? now
-
-        let total = allWords.count
-        let dueThisWeek = allWords.filter { word in
-            (word.nextReviewDate ?? now) <= endOfWeek
-        }.count
-        let learnedThisWeek = allWords.filter { word in
-            word.nextReviewDate != nil
-                && word.interval >= 6
-                && word.timestamp >= startOfWeek
-        }.count
-
-        return (total, dueThisWeek, learnedThisWeek)
-    }
-
     // MARK: - Body
 
+    // Everything derived is computed ONCE here and handed down. Reading a computed property
+    // re-runs it every time, and the previous shape read `filteredWords` (filter + sort) at
+    // least twice per render plus three separate passes for the stats.
+    //
+    // TODO: switch to dynamic @Query if any user's library exceeds ~5k words. See TODOS.md.
     var body: some View {
-        Group {
+        let now = Date()
+        let filtered = LibraryQuery.apply(
+            to: allWords, search: searchText, filter: filter, sort: sortMode, now: now
+        )
+        let stats = LibraryStats.compute(for: allWords, now: now)
+        let groups = LibraryQuery.hasBooks(allWords)
+            ? LibraryQuery.group(filtered: filtered, allWords: allWords, now: now)
+            : []
+
+        return Group {
             if allWords.isEmpty {
                 emptyState
             } else {
                 VStack(spacing: 0) {
-                    statsHeader
+                    statsHeader(stats)
                     filterChips
-                    if filteredWords.isEmpty {
+                    if filtered.isEmpty {
                         noMatchesState
                             .frame(maxHeight: .infinity)
                     } else {
-                        contentList
+                        contentList(filtered: filtered, groups: groups)
                     }
                 }
             }
@@ -121,57 +64,49 @@ struct LibraryView: View {
             }
         }
         .sheet(item: $selectedWord) { word in
-            detailSheet(word)
-        }
-    }
-
-    // MARK: - Grouping by book
-
-    // Once the reader has any book, the Library organizes words under their book (newest book
-    // first, "Free reading" last) — "the words I learned reading L'Étranger". Before any book
-    // exists, it stays a flat list. Search/filter/sort still apply inside each group.
-    private var hasBooks: Bool { allWords.contains { $0.book != nil } }
-
-    private struct BookGroup: Identifiable {
-        let id: String
-        let title: String
-        let words: [Word]
-    }
-
-    private var groupedWords: [BookGroup] {
-        let grouped = Dictionary(grouping: filteredWords) { $0.book }
-        let orderedKeys = grouped.keys.sorted { lhs, rhs in
-            switch (lhs, rhs) {
-            case let (l?, r?): return l.dateAdded > r.dateAdded   // newest book first
-            case (_?, nil): return true                            // real books before "Free reading"
-            case (nil, _?): return false
-            case (nil, nil): return false
-            }
-        }
-        return orderedKeys.map { book in
-            BookGroup(
-                id: book.map { String(describing: $0.persistentModelID) } ?? "free",
-                title: book?.title ?? "Free reading",
-                words: grouped[book] ?? []
-            )
+            WordDetailSheet(word: word)
         }
     }
 
     // MARK: - List
 
-    private var contentList: some View {
+    // Once the reader has any book, the Library organizes words under their book (newest book
+    // first, "Free reading" last) — "the words I learned reading L'Étranger". Before any book
+    // exists, it stays a flat list. Search/filter/sort still apply inside each group; the
+    // section header counts describe the whole book (see LibraryQuery.BookGroup).
+    private func contentList(filtered: [Word], groups: [LibraryQuery.BookGroup]) -> some View {
         List {
-            if hasBooks {
-                ForEach(groupedWords) { group in
-                    Section(group.title) {
+            if groups.isEmpty {
+                ForEach(filtered) { word in rowView(for: word) }
+            } else {
+                ForEach(groups) { group in
+                    Section {
                         ForEach(group.words) { word in rowView(for: word) }
+                    } header: {
+                        bookSectionHeader(group)
                     }
                 }
-            } else {
-                ForEach(filteredWords) { word in rowView(for: word) }
             }
         }
         .listStyle(.plain)
+    }
+
+    private func bookSectionHeader(_ group: LibraryQuery.BookGroup) -> some View {
+        HStack(alignment: .firstTextBaseline) {
+            Text(group.title)
+            Spacer()
+            // Counts describe the BOOK, not the filtered rows below — otherwise a search
+            // would leave the header disagreeing with what's on screen for no visible reason.
+            Text("\(group.totalInBook) · \(group.matureInBook) at \(WordScheduleRules.matureIntervalDays)+ days")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .textCase(nil)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(
+            "\(group.title), \(group.totalInBook) words, "
+            + "\(group.matureInBook) scheduled at \(WordScheduleRules.matureIntervalDays) days or more"
+        )
     }
 
     @ViewBuilder
@@ -245,13 +180,20 @@ struct LibraryView: View {
 
     // MARK: - Stats header
 
-    private var statsHeader: some View {
+    // Three non-overlapping facts. The previous set (total / due this week / learned this
+    // week) routinely rendered "29 / 29 / 0" — two identical numbers and a zero — because
+    // "total" and "due this week" describe almost the same thing on a young library.
+    //
+    // "AT 21+ DAYS" is deliberately not labelled "mastered": one lapse resets the interval
+    // to a single day, and with no review history the app cannot claim a word was ever
+    // previously mature. The label states what is actually true.
+    private func statsHeader(_ stats: LibraryStats) -> some View {
         HStack(spacing: 0) {
-            statCell(value: stats.total, label: "TOTAL")
+            statCell(value: stats.dueNow, label: "DUE NOW")
             Divider().frame(height: 28)
-            statCell(value: stats.dueThisWeek, label: "DUE THIS\nWEEK")
+            statCell(value: stats.learning, label: "LEARNING")
             Divider().frame(height: 28)
-            statCell(value: stats.learnedThisWeek, label: "LEARNED\nTHIS WEEK")
+            statCell(value: stats.mature, label: "AT \(WordScheduleRules.matureIntervalDays)+\nDAYS")
         }
         .padding(.vertical, 16)
         .padding(.horizontal, 8)
@@ -305,113 +247,21 @@ struct LibraryView: View {
     // MARK: - Empty states
 
     private var emptyState: some View {
-        VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(Color(.systemGray6))
-                    .frame(width: 100, height: 100)
-                Image(systemName: "books.vertical")
-                    .font(.system(size: 38, weight: .light))
-                    .foregroundStyle(Color(.systemGray2))
-            }
-            VStack(spacing: 8) {
-                Text("No words yet")
-                    .font(.system(.title2, design: .serif).weight(.semibold))
-                Text("Start a reading session\nto build your vocabulary.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-                    .lineSpacing(4)
-            }
-        }
-        .padding(40)
+        EmptyStateView(
+            systemImage: "books.vertical",
+            title: "No words yet",
+            message: "Start a reading session\nto build your vocabulary."
+        )
     }
 
     private var noMatchesState: some View {
-        VStack(spacing: 20) {
-            ZStack {
-                Circle()
-                    .fill(Color(.systemGray6))
-                    .frame(width: 100, height: 100)
-                Image(systemName: "magnifyingglass")
-                    .font(.system(size: 38, weight: .light))
-                    .foregroundStyle(Color(.systemGray2))
-            }
-            VStack(spacing: 8) {
-                Text("No matches")
-                    .font(.system(.title2, design: .serif).weight(.semibold))
-                Text(searchText.isEmpty
-                     ? "No words in this filter."
-                     : "No words match \u{201C}\(searchText)\u{201D}.")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-        }
-        .padding(40)
-    }
-
-    // MARK: - Detail sheet
-
-    @ViewBuilder
-    private func detailSheet(_ word: Word) -> some View {
-        VStack(alignment: .leading, spacing: 18) {
-            Text(word.word)
-                .font(.system(size: detailWordSize, weight: .bold, design: .serif))
-                .padding(.top, 8)
-
-            if !word.definition.isEmpty {
-                Text(word.definition)
-                    .font(.body)
-                    .foregroundStyle(.primary.opacity(0.85))
-                    .lineSpacing(4)
-            } else {
-                Text("Definition unavailable")
-                    .font(.body)
-                    .foregroundStyle(.secondary)
-                    .italic()
-            }
-
-            if !word.exampleSentence.isEmpty {
-                Text(word.exampleSentence)
-                    .font(.callout)
-                    .italic()
-                    .foregroundStyle(.secondary)
-                    .lineSpacing(4)
-            }
-
-            Spacer()
-
-            VStack(alignment: .leading, spacing: 8) {
-                if let bookTitle = word.book?.title {
-                    HStack(spacing: 6) {
-                        Image(systemName: "book.closed")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                        Text("From \(bookTitle)")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-                if let nrd = word.nextReviewDate {
-                    HStack(spacing: 6) {
-                        Image(systemName: "calendar")
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
-                        Text("Next review \(relativeDate(nrd))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
-        }
-        .padding(.horizontal, 28)
-        .padding(.top, 24)
-        .padding(.bottom, 36)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .presentationDetents([.medium])
-        .presentationCornerRadius(30)
-        .presentationDragIndicator(.visible)
+        EmptyStateView(
+            systemImage: "magnifyingglass",
+            title: "No matches",
+            message: searchText.isEmpty
+                ? "No words in this filter."
+                : "No words match \u{201C}\(searchText)\u{201D}."
+        )
     }
 
     // MARK: - Helpers
