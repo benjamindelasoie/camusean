@@ -58,7 +58,7 @@ untested variable left is the key itself. Two things were fixed along the way:
 | Export compliance | `ITSAppUsesNonExemptEncryption = NO` — no prompt at upload |
 | Usage descriptions | Microphone, Speech Recognition, Camera — all specific and feature-tied |
 | Debug harness | Release build fails if DebugBridge is linked (`scripts/verify-no-debug-bridge.sh`) |
-| Screenshots | `appstore/screenshots/` — 5 shots, 1320x2868 (6.9"), no alpha |
+| Screenshots | **Empty — must be regenerated.** `./scripts/capture-screenshots.sh /tmp/camusean-container` → 1320x2868 (6.9"), no alpha. Preflight blocks until they exist. |
 | Store copy | `app-store-metadata.md` — name, subtitle, description, keywords, category |
 | Review notes | `review-notes.txt` — includes why the app asks for the camera |
 | Privacy labels / age rating | `privacy-labels-and-age-rating.md` |
