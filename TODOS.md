@@ -337,3 +337,42 @@ amber/cream/espresso palette and the book↔voice concept.
 
 **When to revisit.** Before a public App Store release (TestFlight-with-friends is fine as
 is). Low urgency.
+
+---
+
+## 🌐 `Word.sourceLanguage` stores a display name, not a locale
+
+**What.** Store a real BCP-47 locale in `Word.sourceLanguage` and migrate existing rows
+from name to locale (V4 → V5).
+
+**Why.** The field is named `sourceLanguage` and holds `"French"`, not `"fr-FR"`.
+`SessionViewModel.sourceName` (:80) reads the display name out of UserDefaults and
+`saveWord` (:354) writes it straight into the model. Every reader of that field has to
+know it is secretly a display string.
+
+It has already caused one silent defect. During the 2026-07-28 eng review, the plan to
+add tap-to-hear on flashcards passed `word.sourceLanguage` into
+`TTSService.speak(language:)`. `bestVoice(for:)` matches on `language.prefix(2)`, so
+`"French"` yields `"Fr"`, which never matches `"fr-FR"` (`hasPrefix` is case-sensitive).
+The fallback `AVSpeechSynthesisVoice(language: "French")` returns nil, `utterance.voice`
+stays nil, and the synthesizer uses the device default voice — a French word read aloud
+by an English speaker. Caught by the Codex outside voice, verified in source.
+
+The flashcard's language pill carries the same scar: it does
+`word.sourceLanguage.components(separatedBy: "-").first` to extract a language code, and
+renders `"French"` only because there is no dash to split on.
+
+**Shipped mitigation (not a fix).** The review vertical maps the stored name back through
+`ReadingLanguage` at read time before speaking. Correct for every row on disk, old and
+new, but it leaves the trap in place for the next call site.
+
+**Where.** `camusean/Core/Models/Word.swift` (the field), `SessionViewModel.swift:80,354`
+(the writer), `ReadingLanguage.swift` (already owns the name↔locale table),
+`ReviewView.swift` (the pill).
+
+**Cost.** A V4→V5 migration against real device data. Remember the property-level-default
+rule — see the SwiftData migration pitfall learned on v1.1, where init-level defaults were
+not enough and CoreData failed the lightweight phase before custom code could run.
+
+**When to revisit.** Bundle it with the next migration rather than doing one for this
+alone. Nothing is blocked in the meantime.
