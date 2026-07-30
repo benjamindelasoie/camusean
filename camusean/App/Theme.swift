@@ -46,6 +46,19 @@ extension Color {
             : UIColor(red: 0.72, green: 0.36, blue: 0.02, alpha: 1)
     })
 
+    /// "Again" — the lapse. Red because that is the one colour every reader already reads
+    /// as "no" without being taught, and the swipe gesture has no label to explain itself.
+    ///
+    /// A brick red rather than `systemRed`: the palette is aged paper and lamplight, and
+    /// pure iOS red sits outside it badly. Measures 6.49:1 on white, 7.05:1 on black.
+    /// Paired with `camuseanSuccess` it stays distinguishable under deuteranopia, because
+    /// the two differ in lightness as well as hue — the icons carry the meaning regardless.
+    static let camuseanAgain = Color(uiColor: UIColor { traits in
+        traits.userInterfaceStyle == .dark
+            ? UIColor(red: 0.95, green: 0.42, blue: 0.36, alpha: 1)
+            : UIColor(red: 0.70, green: 0.16, blue: 0.11, alpha: 1)
+    })
+
     /// Raised surfaces — the flashcard and the cards stacked behind it.
     ///
     /// This was `Color(.systemBackground)` sitting on a page that is also
