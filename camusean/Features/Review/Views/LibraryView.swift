@@ -91,6 +91,14 @@ struct LibraryView: View {
         .listStyle(.plain)
     }
 
+    /// Section headers pin to the top of a plain `List` while their rows scroll underneath,
+    /// so a header MUST be opaque. The system-provided `Section("title")` header carries a
+    /// background of its own; this custom one replaced it and did not, which let word rows
+    /// slide visibly through the book title.
+    ///
+    /// Full-bleed background with the insets zeroed and the padding reapplied by hand, so
+    /// the fill spans the whole row while the text still lines up with the 20pt leading edge
+    /// the rows use.
     private func bookSectionHeader(_ group: LibraryQuery.BookGroup) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(group.title)
@@ -102,6 +110,11 @@ struct LibraryView: View {
                 .foregroundStyle(.secondary)
                 .textCase(nil)
         }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .listRowInsets(EdgeInsets())
         .accessibilityElement(children: .combine)
         .accessibilityLabel(
             "\(group.title), \(group.totalInBook) words, "
