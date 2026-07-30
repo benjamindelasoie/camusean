@@ -94,9 +94,12 @@ removed at the same time.
    testers, available as soon as the build finishes processing.
 5. He installs TestFlight from the App Store and accepts the invite.
 
-External testing (public link, up to 10,000) needs Beta App Review and a "What to
-Test" note, but still needs no screenshots or store metadata. Only use it if you want
-testers who cannot be added to your team.
+External testing (public link or email, up to 10,000) needs Beta App Review and a
+"What to Test" note, but still needs no screenshots or store metadata. Use it when you
+do not want to give a tester access to your App Store Connect account.
+
+**Every field Apple asks for on the external path, ready to paste, plus a "What to
+Test" note aimed at the parts that are genuinely unverified: `testflight-external.md`.**
 
 ---
 
