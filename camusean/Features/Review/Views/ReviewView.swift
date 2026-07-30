@@ -13,7 +13,33 @@ struct ReviewView: View {
     @State private var showDeleteConfirm = false
     @State private var lastGrade: GradeSnapshot?
 
+
     @AppStorage("autoSpeakOnReveal") private var autoSpeakOnReveal = false
+
+    /// How many cards were due when this review session started.
+    ///
+    /// The deck is a live filter over "what is due right now", so grading a card removes it
+    /// and `words.count` shrinks. Using that as the denominator produced "1 of 42" → "1 of
+    /// 41" → "1 of 40": the position never moved and the total counted down, which reads as
+    /// the work growing rather than shrinking. A session needs a fixed total to measure
+    /// against, captured once when the deck first appears.
+    @State private var sessionTotal: Int?
+
+    /// Cards handled so far, derived rather than counted.
+    ///
+    /// `total - remaining` means undo is free: restoring a word puts it back in the filter,
+    /// remaining goes up, and reviewed goes down without any separate bookkeeping to keep in
+    /// sync. Clamped because a card can in principle re-enter the deck mid-session.
+    private var reviewedCount: Int {
+        guard let sessionTotal else { return 0 }
+        return min(max(0, sessionTotal - words.count), sessionTotal)
+    }
+
+    /// 1-based position of the card on screen, for "N of M".
+    private var cardPosition: Int {
+        guard let sessionTotal, sessionTotal > 0 else { return 0 }
+        return min(reviewedCount + 1, sessionTotal)
+    }
 
     // The big serif word. A fixed 48pt never moved with the reader's text-size setting;
     // @ScaledMetric keeps the design size at the default and scales it from there.
@@ -58,6 +84,10 @@ struct ReviewView: View {
             }
             .navigationTitle("Review")
             .navigationBarTitleDisplayMode(.large)
+            // Capture the session's denominator once, the first time there is a deck to
+            // measure. Re-derived on a later appearance only if the session was finished.
+            .onAppear { beginSessionIfNeeded() }
+            .onChange(of: words.count) { _, _ in beginSessionIfNeeded() }
             // Speech must not outlive the screen that started it.
             .onDisappear { stopCardSpeech() }
             .confirmationDialog(
@@ -128,33 +158,7 @@ struct ReviewView: View {
 
             Spacer()
 
-            ZStack {
-                // Live card. The decorative cards peeking out behind it are drawn in its
-                // .background, so they track its height instead of a shared constant.
-                flashcard(for: words[currentIndex])
-                    .offset(x: dragOffset)
-                    .rotationEffect(.degrees(Double(dragOffset) / 24))
-                    .gesture(
-                        DragGesture()
-                            .onChanged { dragOffset = $0.translation.width }
-                            .onEnded { value in
-                                if value.translation.width > 100 {
-                                    swipeOut(direction: 1) { grade(.good) }
-                                } else if value.translation.width < -100 {
-                                    swipeOut(direction: -1) { grade(.again) }
-                                } else {
-                                    withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
-                                        dragOffset = 0
-                                    }
-                                }
-                            }
-                    )
-                    // VoiceOver cannot swipe-to-grade, so every grade is also a named action.
-                    .accessibilityAction(named: "Again") { grade(.again) }
-                    .accessibilityAction(named: "Good") { grade(.good) }
-                    .accessibilityAction(named: "Easy") { grade(.easy) }
-                    .accessibilityAction(named: "Hear word") { speakCurrentWord() }
-            }
+            deck
 
             Spacer()
 
@@ -174,8 +178,129 @@ struct ReviewView: View {
     /// It now grows with its content and scales with the reader's text-size setting.
     @ScaledMetric(relativeTo: .largeTitle) private var cardMinHeight: CGFloat = 260
 
+    // MARK: - The deck
+
+    /// How many cards are drawn. Only the top one carries content; the rest are edges.
+    private static let visibleDepth = 3
+    /// Drag distance at which a swipe commits, and the distance the rise animation is
+    /// measured against.
+    private static let commitDistance: CGFloat = 100
+
+    /// Measured height of the top card, so the cards behind match it exactly. The top card's
+    /// height changes when the definition is revealed, and a fixed height for the ones
+    /// behind would leave them poking out at the wrong depth.
+    @State private var topCardHeight: CGFloat = 0
+
+    /// The real stack.
+    ///
+    /// Previously this was ONE card view with two empty rounded rectangles drawn inside its
+    /// `.background`. Two consequences, both of which read as wrong:
+    ///
+    ///   - the "stack" translated and rotated *with* the top card, because it was part of it
+    ///   - grading reused the same view with new content, so SwiftUI animated it back from
+    ///     wherever the last card flew off to, and the next word slid in from the side
+    ///
+    /// Now each card is a sibling with its own identity (`persistentModelID`). The top card
+    /// leaves; the one beneath was already on screen and simply becomes the top. Nothing
+    /// slides in, because nothing new arrives.
+    ///
+    ///        ┌─────────────┐        drag ──▶   ┌─────────────┐
+    ///      ┌─┤   card 1    ├─┐               ┌─┤   card 2    ├─┐   card 2 rises toward
+    ///    ┌─┤ └─────────────┘ ├─┐           ┌─┤ └─────────────┘ ├─┐  the top slot as
+    ///    │ │    card 2       │ │           │ │    card 3       │ │  card 1 is dragged
+    ///    └─┴─────────────────┴─┘           └─┴─────────────────┴─┘
+    private var deck: some View {
+        let upcoming = Array(words.dropFirst(currentIndex).prefix(Self.visibleDepth))
+        // 0 at rest, 1 once the drag has travelled far enough to commit. Drives the card
+        // beneath rising into place, so the stack responds continuously to the gesture
+        // rather than jumping when the finger lifts.
+        let riseProgress = min(1, abs(dragOffset) / Self.commitDistance)
+
+        return ZStack {
+            // Reversed so the top card is added last and therefore drawn in front.
+            ForEach(Array(upcoming.enumerated()).reversed(), id: \.element.persistentModelID) { depth, word in
+                Group {
+                    if depth == 0 {
+                        topCard(word)
+                    } else {
+                        restingCard(depth: depth, riseProgress: riseProgress)
+                    }
+                }
+            }
+        }
+    }
+
+    private func topCard(_ word: Word) -> some View {
+        flashcard(for: word)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topCardHeight = $0 }
+            // Badge sits on the edge the card is travelling AWAY from, so it never covers
+            // the word — the thing you are actually being asked to judge.
+            .overlay(alignment: dragOffset > 0 ? .topLeading : .topTrailing) {
+                swipeVerdictBadge.padding(22)
+            }
+            .offset(x: dragOffset)
+            .rotationEffect(.degrees(Double(dragOffset) / 24))
+            .gesture(
+                DragGesture()
+                    .onChanged { dragOffset = $0.translation.width }
+                    .onEnded { value in
+                        if value.translation.width > Self.commitDistance {
+                            swipeOut(direction: 1) { grade(.good) }
+                        } else if value.translation.width < -Self.commitDistance {
+                            swipeOut(direction: -1) { grade(.again) }
+                        } else {
+                            withAnimation(.spring(duration: 0.4, bounce: 0.3)) {
+                                dragOffset = 0
+                            }
+                        }
+                    }
+            )
+            // VoiceOver cannot swipe-to-grade, so every grade is also a named action.
+            .accessibilityAction(named: "Again") { grade(.again) }
+            .accessibilityAction(named: "Good") { grade(.good) }
+            .accessibilityAction(named: "Easy") { grade(.easy) }
+            .accessibilityAction(named: "Hear word") { speakCurrentWord() }
+    }
+
+    /// A card below the top one. Deliberately blank — showing the next word would spoil the
+    /// card before it is turned over. What it contributes is the edge, the depth, and the
+    /// promise that there is more underneath.
+    private func restingCard(depth: Int, riseProgress: CGFloat) -> some View {
+        // Each level sits slightly narrower and lower. As the top card is dragged away, the
+        // level below interpolates toward the top slot.
+        let effectiveDepth = CGFloat(depth) - riseProgress
+        let scale = 1 - 0.05 * effectiveDepth
+        let yOffset = 22 * effectiveDepth
+
+        return RoundedRectangle(cornerRadius: 24)
+            .fill(Color.camuseanCard)
+            .overlay {
+                // A white card on a white page is defined only by its shadow, and a shadow
+                // cast by something already behind another card is nearly invisible — which
+                // is why the stack previously read as a smudge rather than as paper. The
+                // hairline gives each edge an actual line, in both appearances.
+                RoundedRectangle(cornerRadius: 24)
+                    .strokeBorder(Color.primary.opacity(0.10 - 0.02 * effectiveDepth), lineWidth: 1)
+            }
+            .frame(height: topCardHeight > 0 ? topCardHeight : cardMinHeight)
+            .shadow(color: .black.opacity(0.12), radius: 12, y: 6)
+            .padding(.horizontal, 24)
+            .scaleEffect(scale)
+            .offset(y: yOffset)
+            .accessibilityHidden(true)
+    }
+
+    /// Session progress, measured against the deck as it was when the session began.
+    ///
+    /// The bar fills with cards *completed*, so it starts empty and reaches full on the last
+    /// grade. The label names the card you are on. Together they answer the two questions a
+    /// reader actually has mid-session: how far in am I, and how much is left.
     private var progressBar: some View {
-        VStack(alignment: .leading, spacing: 8) {
+        let total = sessionTotal ?? words.count
+        let done = reviewedCount
+        let fraction = total > 0 ? Double(done) / Double(total) : 0
+
+        return VStack(alignment: .leading, spacing: 8) {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     Capsule()
@@ -183,24 +308,29 @@ struct ReviewView: View {
                         .frame(height: 6)
                     Capsule()
                         .fill(Color.camusean)
-                        // The label reads "1 of 29", so the bar has to agree: card 1 of 29
-                        // is 1/29 done, not 0/29. It used to divide by `currentIndex`, which
-                        // rendered an empty track under a label saying "1 of 29".
-                        .frame(
-                            width: geo.size.width * CGFloat(currentIndex + 1) / CGFloat(max(words.count, 1)),
-                            height: 6
-                        )
-                        .animation(.spring(duration: 0.4), value: currentIndex)
+                        .frame(width: max(0, geo.size.width * fraction), height: 6)
+                        .animation(.spring(duration: 0.4), value: done)
                 }
             }
             .frame(height: 6)
-            .accessibilityElement()
-            .accessibilityLabel("Progress")
-            .accessibilityValue("Card \(currentIndex + 1) of \(words.count)")
-            Text("\(currentIndex + 1) of \(words.count)")
-                .font(.caption2.weight(.medium))
-                .foregroundStyle(.secondary)
+
+            HStack {
+                Text("Card \(cardPosition) of \(total)")
+                Spacer()
+                Text(remainingLabel(done: done, total: total))
+            }
+            .font(.caption2.weight(.medium))
+            .foregroundStyle(.secondary)
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Review progress")
+        .accessibilityValue("Card \(cardPosition) of \(total). \(total - done) remaining.")
+    }
+
+    private func remainingLabel(done: Int, total: Int) -> String {
+        let left = max(0, total - done)
+        if done == 0 { return "\(left) to review" }
+        return "\(left) left"
     }
 
     private func flashcard(for word: Word) -> some View {
@@ -251,52 +381,43 @@ struct ReviewView: View {
 
     private func cardBody(for word: Word) -> some View {
                 VStack(spacing: 0) {
-                    // Tap the word to hear it. A plain .onTapGesture here would fight the
-                    // card's parent DragGesture, so this is a Button — SwiftUI gives a button
-                    // priority over an ancestor drag, and VoiceOver gets a real control
-                    // instead of decorated text.
-                    Button { speak(word) } label: {
-                        HStack(spacing: 10) {
-                            Text(word.word)
-                                .font(.system(size: cardWordSize, weight: .bold, design: .serif))
-                                .minimumScaleFactor(0.4)
-                                .lineLimit(2)
-                                .multilineTextAlignment(.center)
+                    // The word is content; the speaker glyph is the control.
+                    //
+                    // The word used to be wrapped in a Button for tap-to-hear, and a Button
+                    // wins the gesture against an ancestor DragGesture — so dragging from the
+                    // middle of the card, which is exactly where a thumb lands, did nothing
+                    // at all. Only the empty surface below it could be swiped. Splitting them
+                    // gives the drag the whole card back and still leaves VoiceOver a real,
+                    // labelled control (plus the card's "Hear word" action).
+                    HStack(spacing: 10) {
+                        Text(word.word)
+                            .font(.system(size: cardWordSize, weight: .bold, design: .serif))
+                            .minimumScaleFactor(0.4)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.center)
+
+                        Button { speak(word) } label: {
                             Image(systemName: "speaker.wave.2")
                                 .font(.system(size: max(14, cardWordSize * 0.32)))
                                 .foregroundStyle(Color.camuseanText)
+                                .frame(width: 44, height: 44)
+                                .contentShape(Rectangle())
                         }
-                        .padding(.horizontal, 28)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        .accessibilityLabel("Hear \(word.word)")
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel(word.word)
-                    .accessibilityHint("Hear it pronounced")
+                    .padding(.horizontal, 20)
 
                     Spacer().frame(height: 12)
 
                     cardStatusRow(for: word)
 
                     if !isRevealed {
-                        Spacer().frame(height: 32)
-
-                        // Swipe direction hints — visible only while dragging
-                        HStack {
-                            Label("Repeat", systemImage: "arrow.clockwise")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(Color.camuseanRepeat)
-                                .opacity(dragOffset < -20 ? 1 : 0)
-                                .animation(.easeOut(duration: 0.12), value: dragOffset)
-
-                            Spacer()
-
-                            Label("Learned", systemImage: "checkmark")
-                                .font(.caption2.weight(.semibold))
-                                .foregroundStyle(Color.camuseanSuccess)
-                                .opacity(dragOffset > 20 ? 1 : 0)
-                                .animation(.easeOut(duration: 0.12), value: dragOffset)
-                        }
-                        .padding(.horizontal, 28)
+                        // The old corner labels ("Repeat" / "Learned", 11pt, unrevealed side
+                        // only) are gone. The verdict now shows as a full badge over the
+                        // card — see `swipeVerdictBadge` — which works on both sides and is
+                        // legible mid-gesture.
+                        Spacer().frame(height: 24)
                     } else {
                         // Definition. The status pill needs clearance or the rule draws
                         // straight through it.
@@ -505,6 +626,67 @@ struct ReviewView: View {
     private func resetCardState() {
         dragOffset = 0
         isRevealed = false
+    }
+
+    /// Starts a session when there is a deck and none is running.
+    ///
+    /// Guarded on `sessionTotal == nil` so grading never re-baselines the denominator — the
+    /// whole point is that it stays put while the deck drains. Cleared once the deck empties
+    /// so returning later starts a fresh count rather than resuming a finished one.
+    private func beginSessionIfNeeded() {
+        let due = words.count
+        if due == 0 {
+            sessionTotal = nil
+        } else if sessionTotal == nil {
+            sessionTotal = due
+        }
+    }
+
+    // MARK: - Swipe verdict
+
+    /// What the swipe is about to do, shown while the finger is still down.
+    ///
+    /// Replaces two small text labels ("Repeat" / "Learned") that appeared only on the
+    /// unrevealed side and only announced themselves at 11pt in the card's bottom corners.
+    /// A gesture with no button attached has to say what it means *before* it commits, at a
+    /// size and colour you cannot miss mid-drag.
+    ///
+    /// Red and green carry the meaning here, so the icons carry it too — a check and a
+    /// counter-clockwise arrow are distinguishable without colour vision, and the two tints
+    /// differ in lightness as well as hue.
+    @ViewBuilder
+    private var swipeVerdictBadge: some View {
+        // Ignore the first few points so a tap or a scroll does not flash a verdict.
+        let travel = max(0, abs(dragOffset) - 12)
+        let strength = min(1, travel / (Self.commitDistance - 12))
+        let isCommitting = abs(dragOffset) >= Self.commitDistance
+        let goingRight = dragOffset > 0
+
+        if strength > 0 {
+            let grade: ReviewGrade = goingRight ? .good : .again
+            let tint: Color = goingRight ? .camuseanSuccess : .camuseanAgain
+
+            HStack(spacing: 8) {
+                Image(systemName: goingRight ? "checkmark" : "arrow.counterclockwise")
+                    .font(.system(size: 20, weight: .heavy))
+                Text(grade.label.uppercased())
+                    .font(.subheadline.weight(.heavy))
+                    .kerning(1.5)
+            }
+            .foregroundStyle(.white)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 16)
+            .background(tint, in: .capsule)
+            // Firms up as you approach the commit distance, so the gesture has a felt
+            // threshold rather than an invisible one.
+            .scaleEffect(0.7 + 0.3 * strength)
+            .opacity(Double(strength))
+            .rotationEffect(.degrees(goingRight ? -8 : 8))
+            .shadow(color: tint.opacity(0.35), radius: isCommitting ? 18 : 8, y: 4)
+            .animation(.easeOut(duration: 0.12), value: isCommitting)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+        }
     }
 
     // MARK: - Card status
