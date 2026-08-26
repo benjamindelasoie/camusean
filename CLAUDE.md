@@ -117,6 +117,25 @@ camusean/                        ← repo root (you are here)
 - Speech is injected via swift-dependencies — `SessionViewModel()` resolves the inert `NoopSpeechRecognizer` in tests by default; override with `withDependencies { $0.speechRecognizer = ... }` to drive the lookup flow without a mic.
 - Manual device tests required for audio (real-mic recognition and TTS don't work in Simulator) — this includes validating the iOS 26 `DictationSpeechRecognizer` path.
 
+## Orca Workflow
+This repo is developed inside **Orca** (agent-managed git worktrees). Use the public `orca` CLI (`orca-cli` skill) for anything touching Orca state — prefer it over raw `git worktree`.
+
+### Fresh-worktree setup
+- A new worktree runs `scripts/orca-worktree-setup.sh` (set as the repo's Setup script in the Orca app — the CLI can't set it). It seeds `camusean/Secrets.plist` from the primary checkout (that file is gitignored, so a new worktree lacks the seeded API key) and pre-resolves SwiftPM packages.
+- If a worktree's builds ship an empty key field, run the setup script manually or `./scripts/set-api-key.sh sk-ant-...`.
+- SwiftPM cache, DerivedData, and the Keychain are shared across worktrees on this machine — there is nothing else to "install" per worktree.
+
+### Parallel agents in child worktrees
+- Spin up an isolated worktree with its own agent: `orca worktree create --name <task> --agent claude --prompt "<work>"` (branches off `main`; `--parent-worktree active` to record lineage). Prefer `--agent` over create-then-open — it puts the agent in the first terminal.
+- Inspect the fleet with `orca worktree ps` / `orca worktree list --json`; drive a worker's terminal with `orca terminal read` / `orca terminal send`.
+- Keep parallel worktrees to genuinely independent work — this is a single-model iOS app, so file-level conflicts on `SessionViewModel`/`Word` are the main risk. Rebase or merge back through normal git; use `/ship` to land.
+- For a fresh agent in the **current** checkout (no new worktree): `orca terminal create --worktree active --command "claude"`.
+
+### iOS QA in the Orca emulator pane
+- `orca emulator list` → `orca emulator attach "iPhone 17 Pro"` (name or UDID from `xcrun simctl list devices`) boots the sim into Orca's emulator pane and scopes it to this worktree.
+- Drive it with `orca emulator tap <x> <y>` (normalized 0..1 coords), `orca emulator type <text>`, `orca emulator gesture <json>`, `orca emulator button home`. `orca emulator kill` stops the helper.
+- Build/install/launch still go through XcodeBuildMCP (`build_run_sim`); the `orca emulator` layer is for the interactive tap/type QA loop while watching the live view. **Mic + TTS still require a real device** — the Simulator can't exercise the speech path.
+
 ## DO NOT
 - Use `@AppStorage` inside `@Observable` classes — they clash at the macro expansion level. Use `UserDefaults.standard` computed properties instead.
 - Call `AVAudioSession` from a plain `actor` — use `@MainActor` for all audio session management.
