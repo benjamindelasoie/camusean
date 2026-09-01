@@ -1,11 +1,14 @@
+import Dependencies
 import Foundation
 import Security
 
 enum KeychainService {
-    private static let service = "com.camusean.app"
-    private static let apiKeyAccount = "anthropic-api-key"
+    private nonisolated static let service = "com.camusean.app"
+    private nonisolated static let apiKeyAccount = "anthropic-api-key"
 
-    static func saveAPIKey(_ key: String) throws {
+    // `nonisolated` (the Security framework is thread-safe) so the `APIKeyStore` live client
+    // can call these from its `@Sendable` closures.
+    nonisolated static func saveAPIKey(_ key: String) throws {
         let data = Data(key.utf8)
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -20,7 +23,7 @@ enum KeychainService {
         }
     }
 
-    static func loadAPIKey() -> String? {
+    nonisolated static func loadAPIKey() -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -34,23 +37,15 @@ enum KeychainService {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Seeds the Keychain from a bundled `Secrets.plist` on first launch, if present.
-    ///
-    /// Used for TestFlight builds so non-technical testers skip the API-key wall:
-    /// a capped, revocable key is baked into the build via the (gitignored) `Secrets.plist`
-    /// resource and copied into the Keychain once — after which it behaves exactly as if the
-    /// user had pasted it in Settings (editable, revocable, persists across launches).
-    ///
-    /// No-op when a key already exists, the file is absent, or the value is still the
-    /// placeholder — in those cases the app falls back to the normal manual-entry flow.
+    /// Seeds the Keychain once from a bundled (gitignored) `Secrets.plist` so TestFlight testers
+    /// skip the API-key wall. No-op when a key already exists, the file is absent, or the value is
+    /// still the placeholder — the app then falls back to manual entry in Settings.
     static func seedAPIKeyIfNeeded() {
         if let existing = loadAPIKey(), !existing.isEmpty {
             print("[seed] key already present — nothing to do")
             return
         }
         guard let url = Bundle.main.url(forResource: "Secrets", withExtension: "plist") else {
-            // Expected for local dev builds; fatal for TestFlight/App Review, where the
-            // tester has no key of their own and the app looks broken without one.
             print("[seed] no Secrets.plist in the bundle — falling back to manual entry")
             return
         }
@@ -66,9 +61,7 @@ enum KeychainService {
             print("[seed] AnthropicAPIKey is still the placeholder — not seeding")
             return
         }
-        // Never `try?` this. A silent failure here is indistinguishable from "no key was
-        // provided", which is exactly the confusion that makes a TestFlight build look
-        // broken to a tester who cannot see any error.
+        // Never `try?` this — a silent failure is indistinguishable from "no key provided".
         do {
             try saveAPIKey(key)
             print("[seed] seeded API key into the Keychain")
@@ -77,14 +70,6 @@ enum KeychainService {
         }
     }
 
-    static func deleteAPIKey() {
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: apiKeyAccount
-        ]
-        SecItemDelete(query as CFDictionary)
-    }
 }
 
 enum KeychainError: LocalizedError {
@@ -94,5 +79,33 @@ enum KeychainError: LocalizedError {
         switch self {
         case .saveFailed(let status): "Keychain save failed: \(status)"
         }
+    }
+}
+
+// swift-dependencies seam (closure-client idiom) so the lookup flow and Settings resolve the
+// key overridably — a test can supply one without the real Keychain. testValue is keyless.
+// Launch seeding stays on the static `seedAPIKeyIfNeeded()`, which runs in `@main` before any
+// dependency scope exists.
+struct APIKeyStore: Sendable {
+    var load: @Sendable () -> String?
+    var save: @Sendable (String) throws -> Void
+}
+
+extension APIKeyStore: DependencyKey {
+    nonisolated static let liveValue = APIKeyStore(
+        load: { KeychainService.loadAPIKey() },
+        save: { try KeychainService.saveAPIKey($0) }
+    )
+    nonisolated static let testValue = APIKeyStore(
+        load: { nil },
+        save: { _ in }
+    )
+    nonisolated static var previewValue: APIKeyStore { testValue }
+}
+
+extension DependencyValues {
+    nonisolated var apiKeyStore: APIKeyStore {
+        get { self[APIKeyStore.self] }
+        set { self[APIKeyStore.self] = newValue }
     }
 }

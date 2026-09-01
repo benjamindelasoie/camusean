@@ -1,26 +1,19 @@
+import Dependencies
 import Foundation
 
-struct LookupResult {
-    /// Target-language only, and safe to speak. The prompt forbids source-language text here
-    /// because a target-language TTS voice mispronounces it — see `formNote`.
+struct LookupResult: Sendable {
+    /// Target-language only and safe to speak — the prompt forbids source-language text (see `formNote`).
     let definition: String
     let exampleSentence: String
-    /// The word Claude believes the reader actually intended, when the speech transcription
-    /// was likely a mishearing. `nil` means "no correction" — the transcription was kept as-is
-    /// (either already a valid word, or the model returned the same/blank value).
+    /// The word Claude thinks was intended when the transcription was a mishearing; nil = kept as-is.
     let correctedWord: String?
-    /// Morphology/lemma teaching for an inflected form ("Past participle of disparaître").
-    /// DISPLAYED, NEVER SPOKEN — it deliberately contains source-language words, which is
-    /// exactly why it must not reach TTS. `nil` when the word is its own dictionary form.
+    /// Morphology note for an inflected form ("Past participle of disparaître"). DISPLAYED, NEVER
+    /// SPOKEN — it contains source-language words the TTS voice would mangle. nil = dictionary form.
     let formNote: String?
 }
 
-// Decodable shape of the model's JSON reply. `correctedWord` and `formNote` are optional so
-// older/edge responses that omit them still decode; both are normalized by
-// `AnthropicService.parseLookupResult`.
-// `nonisolated` so its synthesized `Decodable` conformance is usable from the nonisolated
-// `parseLookupResult` (the module defaults types to @MainActor, which would isolate the
-// conformance and break decoding off the main actor).
+// Decodable reply shape. Optional fields so older responses still decode; both are normalized by
+// `parseLookupResult`. `nonisolated` so decoding works off the main actor.
 private nonisolated struct LookupJSON: Decodable {
     let definition: String
     let exampleSentence: String
@@ -46,30 +39,26 @@ actor AnthropicService {
         resetDailyCountIfNeeded()
         guard dailyCount < dailyCap else { throw LookupError.dailyCapReached }
 
-        // Negative context: words the reader already rejected this session. Biases Claude away
-        // from re-deriving the same wrong interpretation of a repeated mishearing. Strip quotes
-        // and newlines first so a stray transcription character can't malform the prompt.
+        // Negative context: bias Claude away from re-deriving a repeated mishearing. Strip
+        // quotes/newlines so a stray transcription character can't malform the prompt.
         let sanitizedRejections = recentlyRejected
             .map { $0.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty }
         let rejectedClause = sanitizedRejections.isEmpty ? "" : "\n- Never choose any of these already-rejected words: " +
             sanitizedRejections.map { "\"\($0)\"" }.joined(separator: ", ") + "."
 
-        // Book context (when the session is tied to a book) disambiguates the *sense* of the word —
-        // it must NEVER replace a valid word with a thematically-related one (the "suicide" →
-        // "Sisyphe" failure). So it is applied only at the define step, after the word is decided.
+        // Book context disambiguates the word's *sense* only — it must never swap a valid word for
+        // a thematically-related one (the "suicide" → "Sisyphe" failure), so it's applied only when
+        // defining, after the word is decided.
         let bookClause: String = {
             guard let raw = bookContext?.replacingOccurrences(of: "\"", with: "").replacingOccurrences(of: "\n", with: " ").trimmingCharacters(in: .whitespacesAndNewlines),
                   !raw.isEmpty else { return "" }
             return " The reader is reading \"\(raw)\"; use that ONLY to pick the most fitting sense — never to change which word is defined."
         }()
 
-        // The transcription is a *hypothesis*, not ground truth: on the iOS 26 DictationTranscriber
-        // path only one candidate comes back, and the reader is non-native, so phonetic misfires are
-        // systematic. Let Claude correct the word before defining it (same single call, no extra
-        // latency). The keep-if-valid guard is deliberately strict so a valid word is never swapped
-        // for a book-themed one; corrections must be driven by sound, not topic. The reader may also
-        // speak a short phrase (e.g. "mal de l'esprit"), so accept an expression, not just one word.
+        // The transcription is a hypothesis, not ground truth (one candidate on iOS 26, non-native
+        // reader), so Claude corrects the word before defining it — same call. The keep-if-valid
+        // guard is strict: corrections follow sound, never the book's topic. A short phrase is allowed.
         let prompt = """
         Someone reading aloud in \(sourceLanguage) (not a native \(sourceLanguage) speaker) spoke a word or short phrase that on-device speech recognition transcribed as "\(word)". The transcription may be phonetically inaccurate.
 
@@ -99,9 +88,7 @@ actor AnthropicService {
 
         let body: [String: Any] = [
             "model": model,
-            // Raised from 256 when `formNote` was added — a truncated reply is unparseable JSON,
-            // which surfaces to the reader as a failed lookup. This is a ceiling, not a target:
-            // replies stay short, so it costs nothing when unused.
+            // A ceiling, not a target — a truncated reply is unparseable JSON, i.e. a failed lookup.
             "max_tokens": 384,
             "messages": [["role": "user", "content": prompt]]
         ]
@@ -121,7 +108,6 @@ actor AnthropicService {
         default: throw LookupError.serverError(http.statusCode, rawBody)
         }
 
-        // Extract the text content from the Messages API envelope
         guard
             let outer = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
             let content = (outer["content"] as? [[String: Any]])?.first,
@@ -135,9 +121,7 @@ actor AnthropicService {
         return result
     }
 
-    // Pure, `nonisolated static` so it's unit-testable without a network round-trip. Strips any
-    // markdown fences, decodes the JSON object, and normalizes `correctedWord` (blank or a
-    // case-insensitive match of the original transcription collapses to `nil` = no correction).
+    // `nonisolated static` so it's unit-testable without a network round-trip.
     nonisolated static func parseLookupResult(from text: String, original: String) throws -> LookupResult {
         let extracted = extractJSON(from: text)
         guard let jsonData = extracted.data(using: .utf8) else {
@@ -157,9 +141,8 @@ actor AnthropicService {
         )
     }
 
-    // A form note only counts when it carries text. Blank, whitespace-only, or the literal
-    // string "null" (models sometimes emit that inside a JSON string rather than as a JSON
-    // null) all collapse to nil so the UI shows nothing rather than an empty line.
+    // Blank, whitespace, or the literal string "null" (models sometimes emit that inside the JSON
+    // string) all collapse to nil so the UI shows nothing rather than an empty line.
     nonisolated static func normalizeFormNote(_ raw: String?) -> String? {
         guard let raw else { return nil }
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -178,14 +161,12 @@ actor AnthropicService {
     }
 
     nonisolated static func extractJSON(from text: String) -> String {
-        // Strip markdown code fences if present
         var s = text.trimmingCharacters(in: .whitespacesAndNewlines)
         if s.hasPrefix("```") {
             s = s.components(separatedBy: "\n").dropFirst().joined(separator: "\n")
             if s.hasSuffix("```") { s = String(s.dropLast(3)) }
         }
         s = s.trimmingCharacters(in: .whitespacesAndNewlines)
-        // Find the first { and last } and take just that range
         if let start = s.firstIndex(of: "{"), let end = s.lastIndex(of: "}") {
             return String(s[start...end])
         }
@@ -198,6 +179,46 @@ actor AnthropicService {
             dailyCount = 0
             lastResetDate = today
         }
+    }
+}
+
+// swift-dependencies seam (closure-client idiom, off-main-actor). The live client owns one
+// `AnthropicService` actor, so the daily cap is a single app-wide counter. testValue throws.
+struct WordLookupClient: Sendable {
+    var lookup: @Sendable (
+        _ word: String,
+        _ sourceLanguage: String,
+        _ targetLanguage: String,
+        _ bookContext: String?,
+        _ recentlyRejected: [String],
+        _ apiKey: String
+    ) async throws -> LookupResult
+}
+
+extension WordLookupClient: DependencyKey {
+    nonisolated static let liveValue: WordLookupClient = {
+        let service = AnthropicService()
+        return WordLookupClient(lookup: { word, source, target, bookContext, rejected, apiKey in
+            try await service.lookup(
+                word: word,
+                sourceLanguage: source,
+                targetLanguage: target,
+                bookContext: bookContext,
+                recentlyRejected: rejected,
+                apiKey: apiKey
+            )
+        })
+    }()
+    nonisolated static let testValue = WordLookupClient(lookup: { _, _, _, _, _, _ in
+        throw LookupError.invalidResponse
+    })
+    nonisolated static var previewValue: WordLookupClient { testValue }
+}
+
+extension DependencyValues {
+    nonisolated var wordLookup: WordLookupClient {
+        get { self[WordLookupClient.self] }
+        set { self[WordLookupClient.self] = newValue }
     }
 }
 

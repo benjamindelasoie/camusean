@@ -1,21 +1,14 @@
+import Dependencies
 import SwiftUI
 import SwiftData
 
-// A saved word, with the ability to correct what the dictionary got wrong.
-//
-// The editing contract is deliberate. SwiftData models are reference types with live
-// bindings: wiring a TextField straight to `word.definition` writes through on every
-// keystroke, so a "Cancel" button would be a lie — the edit is already persisted before it
-// is pressed. This edits a DRAFT and commits it only on Save.
-//
-//   view ──▶ [Edit] ──▶ draft (local copy) ──▶ [Save]   ──▶ validate ──▶ write + save
-//                                          └─▶ [Cancel] ──▶ discard, model untouched
-//
-// Blank definitions are rejected rather than silently accepted: an empty definition is the
-// app's marker for "the lookup failed", and letting a reader create one by hand would make
-// that state ambiguous. Save failures surface; they do not disappear into a `try?`.
+// SwiftData models are reference types with live bindings: a TextField bound straight to
+// `word.definition` writes through on every keystroke, so Cancel would be a lie. This edits a
+// DRAFT and commits only on Save. Blank definitions are rejected — an empty definition is the
+// app's "lookup failed" marker, so letting a reader type one would make that state ambiguous.
 struct WordDetailSheet: View {
     let word: Word
+    @Dependency(\.speechSynthesizer) private var synth
     @Environment(\.modelContext) private var modelContext
     @Environment(\.dismiss) private var dismiss
 
@@ -176,7 +169,7 @@ struct WordDetailSheet: View {
     }
 
     private func cancelEditing() {
-        // The model was never touched, so there is nothing to roll back.
+        // The model was never touched — nothing to roll back.
         isEditing = false
         saveError = nil
     }
@@ -191,16 +184,17 @@ struct WordDetailSheet: View {
             isEditing = false
             saveError = nil
         } catch {
-            // Surface it. A silent `try?` here loses a correction the reader just typed.
+            // A silent `try?` here would lose a correction the reader just typed.
             saveError = "Couldn't save: \(error.localizedDescription)"
         }
     }
 
     private func speak() {
         let locale = ReadingLanguage.locale(forName: word.sourceLanguage)
+        let speaker = synth
         Task { @MainActor in
             await AudioSessionManager.shared.performPlayback {
-                await TTSService.shared.speak(word.word, language: locale)
+                await speaker.speak(word.word, locale)
             }
         }
     }

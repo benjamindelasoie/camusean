@@ -1,6 +1,9 @@
+import Dependencies
 import SwiftUI
 
 struct SettingsView: View {
+    @Dependency(\.apiKeyStore) private var apiKeyStore
+
     @AppStorage("sourceLanguageLocale") private var sourceLanguageLocale = "fr-FR"
     @AppStorage("sourceLanguageName") private var sourceLanguageName = "French"
     @AppStorage("targetLanguageName") private var targetLanguageName = "English"
@@ -9,8 +12,8 @@ struct SettingsView: View {
     @AppStorage("autoSpeakOnReveal") private var autoSpeakOnReveal = false
 
     @State private var apiKey = ""
-    /// Whether the Keychain already holds a key — tracked separately because the masked
-    /// `apiKey` string is not visible in a SecureField (see `apiKeySection`).
+    /// Tracked separately because a SecureField won't render the masked `apiKey`
+    /// (see `apiKeySection`).
     @State private var hasStoredKey = false
     @State private var showAPIKey = false
     @State private var saveMessage = ""
@@ -57,16 +60,13 @@ struct SettingsView: View {
                 sourceLanguageName = ReadingLanguage.named(locale: newLocale).name
             }
 
-            // This is a reading preference, not a diagnostic — it changes which word the
-            // reader hears defined. It used to live under "Developer" next to the debug
-            // overlay, where nobody would find it.
+            // A reading preference, not a diagnostic — it changes which word gets defined.
             Toggle(isOn: $wordCorrectionEnabled) {
                 Label("Correct misheard words", systemImage: "wand.and.sparkles")
             }
 
-            // Off by default. Hearing a word is useful; having a phone start talking the
-            // instant you flip a card is not something to opt people into silently, and
-            // reviewing happens in places where that matters.
+            // Off by default: a phone that starts talking the instant you flip a card isn't
+            // something to opt people into silently.
             Toggle(isOn: $autoSpeakOnReveal) {
                 Label("Speak words on reveal", systemImage: "speaker.wave.2")
             }
@@ -118,11 +118,9 @@ struct SettingsView: View {
 
     private var apiKeySection: some View {
         Section {
-            // SwiftUI's SecureField does not render text it was given programmatically, so a
-            // stored key shows as a completely blank box — indistinguishable from "no key set".
-            // That matters beyond tidiness: App Review is told the dictionary is pre-configured,
-            // and a reviewer who opens Settings to an empty key field may reasonably conclude it
-            // is not, which is a Guideline 2.1 conversation nobody wants. State it in words.
+            // SecureField won't render a programmatically set value, so a stored key looks like
+            // a blank box — "no key set". App Review is told the dictionary is pre-configured, so
+            // an empty-looking field risks a Guideline 2.1 rejection. State it in words.
             if hasStoredKey {
                 Label("A key is already set up", systemImage: "checkmark.seal.fill")
                     .font(.callout)
@@ -180,7 +178,7 @@ struct SettingsView: View {
             }
         }
         .onAppear {
-            let stored = KeychainService.loadAPIKey()
+            let stored = apiKeyStore.load()
             hasStoredKey = !(stored ?? "").isEmpty
             apiKey = stored.map {
                 String(repeating: "•", count: min($0.count, 20))
@@ -190,9 +188,8 @@ struct SettingsView: View {
 
     // MARK: - About Section
 
-    // App Review guideline 5.1.2 expects the privacy policy to be reachable from inside the
-    // app, not just from the App Store listing. Pushed rather than linked out so it still
-    // works with no network.
+    // App Review guideline 5.1.2 expects the privacy policy reachable inside the app, not just
+    // the App Store listing. Pushed, not linked out, so it works with no network.
     private var aboutSection: some View {
         Section {
             NavigationLink {
@@ -200,10 +197,8 @@ struct SettingsView: View {
             } label: {
                 Label("Privacy Policy", systemImage: "hand.raised")
             }
-            // Tapping the version seven times reveals the diagnostics section. The overlay
-            // has to stay reachable in Release to debug TestFlight builds, but a section
-            // headed "Developer" with a ladybug in it is not something a reader should meet
-            // on their way to the privacy policy.
+            // Seven taps reveal Diagnostics: the overlay must stay reachable in Release to debug
+            // TestFlight builds, but a reader shouldn't meet a "Developer" section by accident.
             Button {
                 versionTapCount += 1
                 if versionTapCount >= 7 { showDeveloperSection = true }
@@ -248,7 +243,7 @@ struct SettingsView: View {
 
     private func saveKey() {
         do {
-            try KeychainService.saveAPIKey(apiKey)
+            try apiKeyStore.save(apiKey)
             saveMessage = "Key saved"
             saveSuccess = true
             hasStoredKey = true

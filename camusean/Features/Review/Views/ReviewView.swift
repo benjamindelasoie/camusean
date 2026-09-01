@@ -1,9 +1,11 @@
+import Dependencies
 import SwiftUI
 import SwiftData
 
 struct ReviewView: View {
-    // Unfiltered + sorted; we filter to "due now" in a computed property so the
-    // cutoff (Date()) refreshes on each render rather than being captured once.
+    @Dependency(\.speechSynthesizer) private var synth
+
+    // Filtered to "due now" in a computed property so the Date() cutoff refreshes each render.
     @Query(sort: \Word.timestamp) private var allWords: [Word]
 
     @Environment(\.modelContext) private var modelContext
@@ -16,39 +18,27 @@ struct ReviewView: View {
 
     @AppStorage("autoSpeakOnReveal") private var autoSpeakOnReveal = false
 
-    /// How many cards were due when this review session started.
-    ///
-    /// The deck is a live filter over "what is due right now", so grading a card removes it
-    /// and `words.count` shrinks. Using that as the denominator produced "1 of 42" → "1 of
-    /// 41" → "1 of 40": the position never moved and the total counted down, which reads as
-    /// the work growing rather than shrinking. A session needs a fixed total to measure
-    /// against, captured once when the deck first appears.
+    /// Fixed denominator, captured once when the deck first appears. The live `words.count`
+    /// shrinks as cards are graded, which would read as "1 of 42 → 1 of 41" — work growing.
     @State private var sessionTotal: Int?
 
-    /// Cards handled so far, derived rather than counted.
-    ///
-    /// `total - remaining` means undo is free: restoring a word puts it back in the filter,
-    /// remaining goes up, and reviewed goes down without any separate bookkeeping to keep in
-    /// sync. Clamped because a card can in principle re-enter the deck mid-session.
+    /// `total - remaining`, so undo is free: restoring a word to the filter moves both counts
+    /// back with no separate bookkeeping. Clamped because a card can re-enter the deck.
     private var reviewedCount: Int {
         guard let sessionTotal else { return 0 }
         return min(max(0, sessionTotal - words.count), sessionTotal)
     }
 
-    /// 1-based position of the card on screen, for "N of M".
     private var cardPosition: Int {
         guard let sessionTotal, sessionTotal > 0 else { return 0 }
         return min(reviewedCount + 1, sessionTotal)
     }
 
-    // The big serif word. A fixed 48pt never moved with the reader's text-size setting;
-    // @ScaledMetric keeps the design size at the default and scales it from there.
+    // @ScaledMetric so the word tracks the reader's text-size setting; a fixed 48pt did not.
     @ScaledMetric(relativeTo: .largeTitle) private var cardWordSize: CGFloat = 48
 
-    /// What a grade overwrote, so undo can put it back exactly.
-    ///
-    /// Holds the word's identity rather than the word: after restoring, the deck is
-    /// recomputed and the card has to be found again by identity, not by position.
+    /// What a grade overwrote, so undo can restore it. Holds identity, not the word: the deck
+    /// is recomputed on restore and the card must be found by identity, not by position.
     private struct GradeSnapshot {
         let id: PersistentIdentifier
         let interval: Int
@@ -57,16 +47,12 @@ struct ReviewView: View {
         let gradeLabel: String
     }
 
-    // The deck shown to the user: words with no schedule yet (new) or due now.
     private var words: [Word] {
         WordScheduleRules.dueDeck(from: allWords)
     }
 
-    /// The card being reviewed, or nil when the deck is empty.
-    ///
-    /// Every mutation goes through this. Previously three call sites indexed `words` by hand
-    /// and only one of them checked the bounds first — an out-of-range crash waiting for the
-    /// deck and the index to disagree, which undo and a third grade button both make easier.
+    /// The card being reviewed, or nil when the deck is empty. Every mutation goes through
+    /// this bounds-checked accessor so the deck and index disagreeing can't crash.
     private var currentWord: Word? {
         words.indices.contains(currentIndex) ? words[currentIndex] : nil
     }
@@ -84,8 +70,6 @@ struct ReviewView: View {
             }
             .navigationTitle("Review")
             .navigationBarTitleDisplayMode(.large)
-            // Capture the session's denominator once, the first time there is a deck to
-            // measure. Re-derived on a later appearance only if the session was finished.
             .onAppear { beginSessionIfNeeded() }
             .onChange(of: words.count) { _, _ in beginSessionIfNeeded() }
             // Speech must not outlive the screen that started it.
@@ -172,48 +156,24 @@ struct ReviewView: View {
         }
     }
 
-    /// Floor, not a fixed height. The card used to be pinned at 380pt regardless of what
-    /// was on it, so at default text size the revealed side was roughly 60% empty white —
-    /// it only looked right at accessibility sizes, which is what it had been sized for.
-    /// It now grows with its content and scales with the reader's text-size setting.
+    // A floor, not a fixed height: the card grows with its content and scales with text size.
     @ScaledMetric(relativeTo: .largeTitle) private var cardMinHeight: CGFloat = 260
 
     // MARK: - The deck
 
-    /// How many cards are drawn. Only the top one carries content; the rest are edges.
+    // Only the top card carries content; the rest are blank edges for depth.
     private static let visibleDepth = 3
-    /// Drag distance at which a swipe commits, and the distance the rise animation is
-    /// measured against.
+    // Drag distance at which a swipe commits; also what the rise animation is measured against.
     private static let commitDistance: CGFloat = 100
 
-    /// Measured height of the top card, so the cards behind match it exactly. The top card's
-    /// height changes when the definition is revealed, and a fixed height for the ones
-    /// behind would leave them poking out at the wrong depth.
+    // Measured so the cards behind match the top card's height, which changes on reveal.
     @State private var topCardHeight: CGFloat = 0
 
-    /// The real stack.
-    ///
-    /// Previously this was ONE card view with two empty rounded rectangles drawn inside its
-    /// `.background`. Two consequences, both of which read as wrong:
-    ///
-    ///   - the "stack" translated and rotated *with* the top card, because it was part of it
-    ///   - grading reused the same view with new content, so SwiftUI animated it back from
-    ///     wherever the last card flew off to, and the next word slid in from the side
-    ///
-    /// Now each card is a sibling with its own identity (`persistentModelID`). The top card
-    /// leaves; the one beneath was already on screen and simply becomes the top. Nothing
-    /// slides in, because nothing new arrives.
-    ///
-    ///        ┌─────────────┐        drag ──▶   ┌─────────────┐
-    ///      ┌─┤   card 1    ├─┐               ┌─┤   card 2    ├─┐   card 2 rises toward
-    ///    ┌─┤ └─────────────┘ ├─┐           ┌─┤ └─────────────┘ ├─┐  the top slot as
-    ///    │ │    card 2       │ │           │ │    card 3       │ │  card 1 is dragged
-    ///    └─┴─────────────────┴─┘           └─┴─────────────────┴─┘
+    /// Each card is a sibling with its own identity (`persistentModelID`), not one reused view:
+    /// the top card leaves and the one beneath becomes the top, so nothing slides in.
     private var deck: some View {
         let upcoming = Array(words.dropFirst(currentIndex).prefix(Self.visibleDepth))
-        // 0 at rest, 1 once the drag has travelled far enough to commit. Drives the card
-        // beneath rising into place, so the stack responds continuously to the gesture
-        // rather than jumping when the finger lifts.
+        // 0 at rest, 1 once the drag commits; drives the card beneath rising continuously.
         let riseProgress = min(1, abs(dragOffset) / Self.commitDistance)
 
         return ZStack {
@@ -233,8 +193,7 @@ struct ReviewView: View {
     private func topCard(_ word: Word) -> some View {
         flashcard(for: word)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topCardHeight = $0 }
-            // Badge sits on the edge the card is travelling AWAY from, so it never covers
-            // the word — the thing you are actually being asked to judge.
+            // Badge sits on the edge the card is travelling away from, so it never covers the word.
             .overlay(alignment: dragOffset > 0 ? .topLeading : .topTrailing) {
                 swipeVerdictBadge.padding(22)
             }
@@ -262,12 +221,9 @@ struct ReviewView: View {
             .accessibilityAction(named: "Hear word") { speakCurrentWord() }
     }
 
-    /// A card below the top one. Deliberately blank — showing the next word would spoil the
-    /// card before it is turned over. What it contributes is the edge, the depth, and the
-    /// promise that there is more underneath.
+    /// A card below the top one, deliberately blank — showing the next word would spoil it.
     private func restingCard(depth: Int, riseProgress: CGFloat) -> some View {
-        // Each level sits slightly narrower and lower. As the top card is dragged away, the
-        // level below interpolates toward the top slot.
+        // Narrower and lower per level, interpolating toward the top slot as the top is dragged away.
         let effectiveDepth = CGFloat(depth) - riseProgress
         let scale = 1 - 0.05 * effectiveDepth
         let yOffset = 22 * effectiveDepth
@@ -275,10 +231,8 @@ struct ReviewView: View {
         return RoundedRectangle(cornerRadius: 24)
             .fill(Color.camuseanCard)
             .overlay {
-                // A white card on a white page is defined only by its shadow, and a shadow
-                // cast by something already behind another card is nearly invisible — which
-                // is why the stack previously read as a smudge rather than as paper. The
-                // hairline gives each edge an actual line, in both appearances.
+                // A hairline stroke: a white card on white is otherwise defined only by a shadow
+                // that's nearly invisible behind another card, so the edges read as a smudge.
                 RoundedRectangle(cornerRadius: 24)
                     .strokeBorder(Color.primary.opacity(0.10 - 0.02 * effectiveDepth), lineWidth: 1)
             }
@@ -290,11 +244,8 @@ struct ReviewView: View {
             .accessibilityHidden(true)
     }
 
-    /// Session progress, measured against the deck as it was when the session began.
-    ///
-    /// The bar fills with cards *completed*, so it starts empty and reaches full on the last
-    /// grade. The label names the card you are on. Together they answer the two questions a
-    /// reader actually has mid-session: how far in am I, and how much is left.
+    /// Fills with cards completed (measured against the session's starting deck), so it starts
+    /// empty and reaches full on the last grade.
     private var progressBar: some View {
         let total = sessionTotal ?? words.count
         let done = reviewedCount
@@ -339,8 +290,8 @@ struct ReviewView: View {
             .frame(minHeight: cardMinHeight)
             .background {
                 ZStack {
-                    // The two cards peeking out behind. Drawn in the background so they
-                    // inherit the live card's height rather than a shared constant.
+                    // The two cards peeking out behind, drawn in the background so they inherit
+                    // the live card's height rather than a shared constant.
                     RoundedRectangle(cornerRadius: 24)
                         .fill(Color.camuseanCard)
                         .padding(.horizontal, 20)
@@ -363,9 +314,8 @@ struct ReviewView: View {
                 }
             }
             .overlay(alignment: .topTrailing) {
-                // Destructive and irreversible, so it asks first. 44pt hit area — it used to
-                // be 32pt in the corner of a card the reader is actively dragging, which made
-                // a mis-swipe capable of silently deleting the word.
+                // 44pt hit area on a card the reader is actively dragging, so a mis-swipe can't
+                // trigger it; the delete is destructive and irreversible, so it asks first.
                 Button { showDeleteConfirm = true } label: {
                     Image(systemName: "xmark")
                         .font(.system(size: 13, weight: .semibold))
@@ -381,14 +331,9 @@ struct ReviewView: View {
 
     private func cardBody(for word: Word) -> some View {
                 VStack(spacing: 0) {
-                    // The word is content; the speaker glyph is the control.
-                    //
-                    // The word used to be wrapped in a Button for tap-to-hear, and a Button
-                    // wins the gesture against an ancestor DragGesture — so dragging from the
-                    // middle of the card, which is exactly where a thumb lands, did nothing
-                    // at all. Only the empty surface below it could be swiped. Splitting them
-                    // gives the drag the whole card back and still leaves VoiceOver a real,
-                    // labelled control (plus the card's "Hear word" action).
+                    // The word must not be a Button: a Button wins the gesture against the ancestor
+                    // DragGesture, so dragging from the card's middle (where a thumb lands) did
+                    // nothing. Keeping the speaker a separate control gives the drag the whole card.
                     HStack(spacing: 10) {
                         Text(word.word)
                             .font(.system(size: cardWordSize, weight: .bold, design: .serif))
@@ -413,14 +358,9 @@ struct ReviewView: View {
                     cardStatusRow(for: word)
 
                     if !isRevealed {
-                        // The old corner labels ("Repeat" / "Learned", 11pt, unrevealed side
-                        // only) are gone. The verdict now shows as a full badge over the
-                        // card — see `swipeVerdictBadge` — which works on both sides and is
-                        // legible mid-gesture.
                         Spacer().frame(height: 24)
                     } else {
-                        // Definition. The status pill needs clearance or the rule draws
-                        // straight through it.
+                        // Clearance so the rule below doesn't draw through the status pill.
                         Spacer().frame(height: 16)
 
                         Rectangle()
@@ -437,17 +377,13 @@ struct ReviewView: View {
                                         .foregroundStyle(.secondary)
                                         .italic()
                                 } else {
-                                    // The definition is the payoff — the reason the card was
-                                    // flipped. It used to render at .callout, smaller than the
-                                    // example sentence read, which inverted the hierarchy.
                                     Text(word.definition)
                                         .font(.title3)
                                         .foregroundStyle(.primary)
                                         .multilineTextAlignment(.center)
                                         .lineSpacing(4)
-                                    // Where this form comes from, e.g. "Past participle of
-                                    // disparaître". nil for words saved before v1.5 and for words
-                                    // that are already their own dictionary form.
+                                    // e.g. "Past participle of disparaître". nil before v1.5 and
+                                    // for words already in their own dictionary form.
                                     if let formNote = word.formNote {
                                         Text(formNote)
                                             .font(.footnote)
@@ -469,9 +405,7 @@ struct ReviewView: View {
                         }
                     }
                 }
-                // Take the card's ideal height, not whatever the surrounding Spacers offer.
-                // Without this the inner layout stretched to fill the screen, which is how
-                // the card ended up ~60% empty white at default text size.
+                // Take the card's ideal height; without this the layout stretches to fill the screen.
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.vertical, 28)
     }
@@ -498,8 +432,8 @@ struct ReviewView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 16))
                 }
             } else {
-                // Three grades, not two. Easy (q=5) is the only one that raises an ease
-                // factor — without it the deck could only ever get stricter.
+                // Easy (q=5) is the only grade that raises the ease factor; without it the
+                // deck could only ever get stricter.
                 HStack(spacing: 8) {
                     ForEach(ReviewGrade.allCases) { g in
                         reviewButton(grade: g)
@@ -510,13 +444,12 @@ struct ReviewView: View {
     }
 
     private func reviewButton(grade g: ReviewGrade) -> some View {
-        // Three visually distinct tints. Again and Good were both in the amber family and
-        // read as the same button at a glance — which is the one mistake a grading row
-        // cannot afford, since the two mean opposite things to the scheduler.
+        // Distinct tints because Again and Good mean opposite things to the scheduler and must
+        // not read as the same button at a glance.
         let tint: Color = switch g {
-        case .again: .camuseanRepeat        // burnt orange — the lapse
-        case .good:  .primary               // neutral — the ordinary answer
-        case .easy:  .camuseanSuccess       // green — the only one that raises ease
+        case .again: .camuseanRepeat
+        case .good:  .primary
+        case .easy:  .camuseanSuccess
         }
         return Button { grade(g) } label: {
             VStack(spacing: 8) {
@@ -571,7 +504,7 @@ struct ReviewView: View {
 
     private func grade(_ grade: ReviewGrade) {
         guard let word = currentWord else { return }
-        // Snapshot before mutating so undo can restore the exact prior schedule.
+        // Snapshot before mutating so undo can restore the prior schedule.
         lastGrade = GradeSnapshot(
             id: word.persistentModelID,
             interval: word.interval,
@@ -582,18 +515,14 @@ struct ReviewView: View {
         stopCardSpeech()
         SRSScheduler.schedule(word: word, quality: grade.quality)
         try? modelContext.save()
-        // The deck is a filter, not a stored list: the freshly scheduled word drops out and
-        // the next due card slides into the same index. currentIndex deliberately does not
-        // advance — see `undoLastGrade` for why that matters.
+        // The graded word drops out of the filter and the next due card slides into the same
+        // index; currentIndex must not advance — see `undoLastGrade`.
         resetCardState()
     }
 
-    /// Puts the last graded word back and returns to it.
-    ///
-    /// Restoring alone is not enough. `allWords` is sorted by `timestamp`, so the word
-    /// re-enters the deck at its chronological position, which can be *before* the current
-    /// index — every later card shifts by one and `currentIndex` silently points at a
-    /// different word. Seeking by identity is what makes undo land on the card you undid.
+    /// Puts the last graded word back and returns to it. The word re-enters the timestamp-sorted
+    /// deck at its chronological position, which can be before currentIndex, so undo seeks the
+    /// card by identity rather than trusting the index.
     private func undoLastGrade() {
         guard let snapshot = lastGrade,
               let word = allWords.first(where: { $0.persistentModelID == snapshot.id })
@@ -605,7 +534,7 @@ struct ReviewView: View {
         word.nextReviewDate = snapshot.nextReviewDate
         try? modelContext.save()
 
-        // Deck has been recomputed by the mutation above; find the restored card by identity.
+        // The mutation above recomputed the deck; find the restored card by identity.
         if let restored = words.firstIndex(where: { $0.persistentModelID == snapshot.id }) {
             currentIndex = restored
         }
@@ -613,13 +542,11 @@ struct ReviewView: View {
         resetCardState()
     }
 
-    // Reached only through the confirmation dialog — see the card's "×" button.
     private func deleteCurrentWord() {
         guard let word = currentWord else { return }
         stopCardSpeech()
         modelContext.delete(word)
         lastGrade = nil   // the snapshot's word no longer exists
-        // Row removed entirely; the next due card slides into currentIndex.
         resetCardState()
     }
 
@@ -628,11 +555,8 @@ struct ReviewView: View {
         isRevealed = false
     }
 
-    /// Starts a session when there is a deck and none is running.
-    ///
-    /// Guarded on `sessionTotal == nil` so grading never re-baselines the denominator — the
-    /// whole point is that it stays put while the deck drains. Cleared once the deck empties
-    /// so returning later starts a fresh count rather than resuming a finished one.
+    /// Guarded on `sessionTotal == nil` so grading never re-baselines the denominator while the
+    /// deck drains; cleared once the deck empties so returning later starts a fresh count.
     private func beginSessionIfNeeded() {
         let due = words.count
         if due == 0 {
@@ -644,16 +568,9 @@ struct ReviewView: View {
 
     // MARK: - Swipe verdict
 
-    /// What the swipe is about to do, shown while the finger is still down.
-    ///
-    /// Replaces two small text labels ("Repeat" / "Learned") that appeared only on the
-    /// unrevealed side and only announced themselves at 11pt in the card's bottom corners.
-    /// A gesture with no button attached has to say what it means *before* it commits, at a
-    /// size and colour you cannot miss mid-drag.
-    ///
-    /// Red and green carry the meaning here, so the icons carry it too — a check and a
-    /// counter-clockwise arrow are distinguishable without colour vision, and the two tints
-    /// differ in lightness as well as hue.
+    /// What the swipe is about to do, shown mid-drag before it commits. Icons (check vs.
+    /// counter-clockwise arrow) carry the meaning alongside the red/green tints, so it reads
+    /// without colour vision.
     @ViewBuilder
     private var swipeVerdictBadge: some View {
         // Ignore the first few points so a tap or a scroll does not flash a verdict.
@@ -677,8 +594,6 @@ struct ReviewView: View {
             .padding(.vertical, 10)
             .padding(.horizontal, 16)
             .background(tint, in: .capsule)
-            // Firms up as you approach the commit distance, so the gesture has a felt
-            // threshold rather than an invisible one.
             .scaleEffect(0.7 + 0.3 * strength)
             .opacity(Double(strength))
             .rotationEffect(.degrees(goingRight ? -8 : 8))
@@ -691,8 +606,6 @@ struct ReviewView: View {
 
     // MARK: - Card status
 
-    /// Where the word came from and how well it is known — both derived from data the app
-    /// already stores, so neither costs a schema change.
     @ViewBuilder
     private func cardStatusRow(for word: Word) -> some View {
         let progress = WordScheduleRules.progress(for: word)
@@ -738,22 +651,17 @@ struct ReviewView: View {
 
     // MARK: - Audio
 
-    /// Speaks the current word in the language it was read in.
-    ///
-    /// The locale has to be resolved, not read. `Word.sourceLanguage` stores a display NAME
-    /// ("French"), not a BCP-47 tag — `SessionViewModel.sourceName` reads it out of
-    /// UserDefaults and `saveWord` persists it verbatim. Passing it straight to
-    /// `TTSService.speak(language:)` matches nothing (`bestVoice` compares the first two
-    /// characters, and "Fr" never matches "fr-FR"), the fallback voice constructor returns
-    /// nil, and the synthesizer falls back to the device default — a French word read aloud
-    /// by an English voice. See the TODOS entry for the underlying field fix.
+    /// The locale must be resolved, not read: `Word.sourceLanguage` stores a display name
+    /// ("French"), not a BCP-47 tag, so passing it straight to TTS matches no voice and the
+    /// synthesizer falls back to an English voice reading a French word.
     private func speak(_ word: Word) {
         let locale = ReadingLanguage.locale(forName: word.sourceLanguage)
+        let speaker = synth
         Task { @MainActor in
-            // performPlayback suspends capture if a reading session is live and hands the
-            // microphone back afterwards, so this is safe from either tab.
+            // performPlayback suspends any live capture and hands the mic back after, so this
+            // is safe from either tab.
             await AudioSessionManager.shared.performPlayback {
-                await TTSService.shared.speak(word.word, language: locale)
+                await speaker.speak(word.word, locale)
             }
         }
     }
@@ -763,10 +671,10 @@ struct ReviewView: View {
         speak(word)
     }
 
-    /// Speech must not outlive the card that started it — grading, undo, delete, and leaving
-    /// the screen all cut it off, otherwise the previous word talks over the next one.
+    /// Speech must not outlive the card that started it, or the previous word talks over the
+    /// next; grading, undo, delete, and leaving the screen all call this.
     private func stopCardSpeech() {
-        TTSService.shared.stopSpeaking()
+        synth.stop()
     }
 }
 

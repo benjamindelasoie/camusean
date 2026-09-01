@@ -1,31 +1,23 @@
 import AVFoundation
+import Dependencies
 
 // Speech output. One synthesizer, shared by the reading session and the review deck.
 //
-// speak() is INTERRUPT-AND-REPLACE. A second call cuts the first one off and its `await`
-// returns immediately. This matters because there is exactly one continuation slot: the
-// original implementation overwrote it, so the first caller's `await` never resumed and
-// that task hung for the life of the app. Latent while only SessionViewModel called it
-// (sequentially, one flow); reachable the moment a flashcard word became tappable.
+// speak() is INTERRUPT-AND-REPLACE: a second call cuts the first off and its `await` returns.
+// There is one continuation slot and delegate callbacks arrive out of band, so `finish` resumes
+// only for the utterance the slot currently belongs to — otherwise a stale didCancel for the
+// previous utterance would resume the new caller while it is still speaking.
 //
 //   speak(A) ──▶ continuation = cA, currentUtterance = A ──▶ synthesizer.speak(A)
-//   speak(B) ──▶ cA.resume()          ← A's caller unblocks, does not hang
-//                currentUtterance = nil
-//                stopSpeaking          ← queues didCancel(A) on the main actor
-//                continuation = cB, currentUtterance = B
+//   speak(B) ──▶ cA.resume()  ← A unblocks; stopSpeaking queues didCancel(A); slot = cB / B
 //   didCancel(A) ──▶ A !== currentUtterance (now B) ──▶ ignored
 //   didFinish(B) ──▶ B === currentUtterance ──▶ cB.resume()
-//
-// The identity check is load-bearing: without it the queued didCancel for the *previous*
-// utterance resumes the *new* caller's continuation, so B's await returns while B is
-// still speaking.
 @MainActor
 final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     static let shared = TTSService()
     private let synthesizer = AVSpeechSynthesizer()
     private var continuation: CheckedContinuation<Void, Never>?
-    /// The utterance the stored continuation belongs to. Delegate callbacks for any other
-    /// utterance are stale and must be ignored.
+    /// The utterance the stored continuation belongs to; callbacks for any other are stale.
     private var currentUtterance: AVSpeechUtterance?
 
     private override init() {
@@ -58,18 +50,15 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
             ?? AVSpeechSynthesisVoice(language: language)
     }
 
-    // True if an Enhanced or Premium voice is installed for `language` (matches by 2-letter prefix).
-    // Without one, AVSpeechSynthesizer falls back to the compact default and sounds robotic.
-    // Users must download enhanced voices in iOS Settings -> Accessibility -> Spoken Content.
+    // Without an Enhanced/Premium voice the synthesizer falls back to the compact voice and
+    // sounds robotic (users install voices in Settings › Accessibility › Spoken Content).
     static func hasEnhancedVoice(forLanguagePrefix prefix: String) -> Bool {
         AVSpeechSynthesisVoice.speechVoices()
             .filter { $0.language.hasPrefix(prefix) }
             .contains { $0.quality == .enhanced || $0.quality == .premium }
     }
 
-    /// Stops any in-flight speech and unblocks its caller. Safe to call when nothing is
-    /// speaking. Callers that own the audio session (a review card leaving the screen, a
-    /// session ending) should use this rather than letting speech outlive its context.
+    /// Stops in-flight speech and unblocks its caller. Safe when nothing is speaking.
     func stopSpeaking() {
         continuation?.resume()
         continuation = nil
@@ -77,12 +66,9 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
         synthesizer.stopSpeaking(at: .immediate)
     }
 
-    /// Resumes the waiter only if the callback belongs to the utterance it is waiting on.
-    ///
-    /// Compared by `ObjectIdentifier` rather than the utterance itself: `AVSpeechUtterance`
-    /// is not `Sendable`, so under Swift 6 it cannot cross from the nonisolated delegate to
-    /// the main actor. The identifier is a plain value and can. `currentUtterance` keeps a
-    /// strong reference so the address cannot be recycled by a later utterance.
+    /// Resume the waiter only if the callback is for the utterance the slot belongs to. Compared
+    /// by `ObjectIdentifier` because `AVSpeechUtterance` isn't `Sendable` and can't cross from the
+    /// nonisolated delegate; `currentUtterance` holds a strong ref so the address can't be recycled.
     private func finish(_ id: ObjectIdentifier) {
         guard let current = currentUtterance, ObjectIdentifier(current) == id else {
             return   // stale: superseded by a newer speak()
@@ -100,5 +86,29 @@ final class TTSService: NSObject, AVSpeechSynthesizerDelegate {
     nonisolated func speechSynthesizer(_ synthesizer: AVSpeechSynthesizer, didCancel utterance: AVSpeechUtterance) {
         let id = ObjectIdentifier(utterance)
         Task { @MainActor in self.finish(id) }
+    }
+}
+
+// swift-dependencies seam (closure-client idiom), forwarding to the shared synthesizer so output
+// can be overridden in the reading flow and previews. `stop` is a sync `@MainActor` call so the
+// non-async teardown paths (`endSession`, `cancelCurrentLookup`) cut speech without a Task.
+struct SpeechSynthesizerClient: Sendable {
+    var speak: @Sendable (_ text: String, _ language: String) async -> Void
+    var stop: @MainActor @Sendable () -> Void
+}
+
+extension SpeechSynthesizerClient: DependencyKey {
+    nonisolated static let liveValue = SpeechSynthesizerClient(
+        speak: { text, language in await TTSService.shared.speak(text, language: language) },
+        stop: { TTSService.shared.stopSpeaking() }
+    )
+    nonisolated static let testValue = SpeechSynthesizerClient(speak: { _, _ in }, stop: {})
+    nonisolated static var previewValue: SpeechSynthesizerClient { testValue }
+}
+
+extension DependencyValues {
+    nonisolated var speechSynthesizer: SpeechSynthesizerClient {
+        get { self[SpeechSynthesizerClient.self] }
+        set { self[SpeechSynthesizerClient.self] = newValue }
     }
 }

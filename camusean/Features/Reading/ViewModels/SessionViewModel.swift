@@ -8,8 +8,7 @@ enum SessionPhase {
     case idle
     case listening
     case processing(String)
-    // word, definition, formNote. `formNote` is rendered on the result card but must never be
-    // handed to TTS — it deliberately contains source-language text (see LookupResult.formNote).
+    // formNote is shown on the result card but must never reach TTS (see LookupResult.formNote).
     case result(String, String, String?)
     case error(String)
 }
@@ -22,19 +21,16 @@ final class SessionViewModel {
     var lookupCount = 0
     var showSummary = false
 
-    // Set when mic/speech permission is denied. iOS won't re-prompt after a denial,
-    // so the start screen shows an "Open Settings" path instead of a terminal red message.
+    // iOS won't re-prompt after a denial, so the start screen offers an "Open Settings" path.
     var permissionDenied = false
 
-    // The Settings deep-link is exposed here so the view doesn't import UIKit.
+    // Here so the view doesn't import UIKit.
     let settingsURLString = UIApplication.openSettingsURLString
 
     var partialTranscription: String { speechService.partialTranscription }
 
-    // Mirrored recognizer diagnostics for the session debug overlay. The recognizer is held
-    // as `@ObservationIgnored @Dependency` and typed as a bare `any SpeechRecognizing`
-    // existential, so SwiftUI can't observe changes inside it — we copy the values into these
-    // stored @Observable props from the @MainActor listening loop so the HUD updates live.
+    // Mirrored from the recognizer for the debug overlay: it's a bare `any SpeechRecognizing`
+    // existential SwiftUI can't observe, so the listening loop copies these out.
     var debugBackendName = ""
     var debugLocaleSupported: Bool? = nil
     var debugLastError: String? = nil
@@ -42,35 +38,29 @@ final class SessionViewModel {
 
     var debugPhaseLabel: String { Self.phaseLabel(phase) }
 
-    // Cancel + biased-retry state (locked by /plan-eng-review 2026-05-23).
-    // Internal (not private) so test target can read via @testable import.
+    // Cancel + biased-retry state. Internal (not private) so tests can read it via @testable import.
     var currentWord: Word?
     var lookupCancelled: Bool = false
     var recentlyRejected: [(transcription: String, at: Date)] = []
 
-    // The raw ASR transcription for the in-flight lookup, tracked separately from `currentWord`
-    // because correction rewrites `currentWord.word` to the *intended* word. On reject we must
-    // blocklist what was actually misheard (the transcription), not the corrected word, or the
-    // biased-retry filter and the negative-context prompt key off the wrong token.
+    // Tracked apart from `currentWord` because correction rewrites `currentWord.word` to the
+    // intended word: on reject we must blocklist what was actually misheard, not the correction.
     var currentOriginalTranscription: String?
 
     let rejectionWindowSeconds: TimeInterval = 10
     let rejectionCap: Int = 3
 
     private let sessionCap = 50
-    // Resolved through swift-dependencies: the live OS-appropriate recognizer in the app,
-    // an overridable seam in tests/previews. @ObservationIgnored because @Dependency is its
-    // own property wrapper and must not be wrapped again by @Observable.
+    // @ObservationIgnored: @Dependency is its own wrapper and must not be re-wrapped by @Observable.
     @ObservationIgnored @Dependency(\.speechRecognizer) private var speechService
-    private let anthropicService = AnthropicService()
-    private let tts = TTSService.shared
+    @ObservationIgnored @Dependency(\.wordLookup) private var wordLookup
+    @ObservationIgnored @Dependency(\.apiKeyStore) private var apiKeyStore
+    @ObservationIgnored @Dependency(\.speechSynthesizer) private var synth
     private var listeningTask: Task<Void, Never>?
     var modelContext: ModelContext?
 
-    // The book this session is reading, or nil for a "free" session. Set on the start screen
-    // before startSession(). When set (and it carries a language), it overrides the global Settings
-    // reading language for the session, its title/author sharpen the lookup prompt, and every saved
-    // word is tagged to it.
+    // The book being read (nil = free session). When it carries a language it overrides the global
+    // reading language for the session, sharpens the lookup prompt, and tags every saved word.
     var activeBook: Book?
 
     var sourceLocale: String {
@@ -83,8 +73,7 @@ final class SessionViewModel {
     }
     var targetName: String { UserDefaults.standard.string(forKey: "targetLanguageName") ?? "English" }
 
-    // Prompt context: what the reader is currently reading, e.g. "L'Étranger by Albert Camus".
-    // nil for a free session. Helps Claude disambiguate a word's sense within the book.
+    // e.g. "L'Étranger by Albert Camus" — sharpens the lookup prompt; nil for a free session.
     private var bookContext: String? {
         guard let book = activeBook else { return nil }
         let title = book.title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -93,9 +82,8 @@ final class SessionViewModel {
         return author.isEmpty ? title : "\(title) by \(author)"
     }
 
-    // Kill-switch for LLM word correction (Settings → Developer). Defaults ON. When OFF the
-    // lookup still logs what Claude *would* have corrected to (so the false-correction rate is
-    // observable) but applies nothing — the design's "log without applying" safe-rollout mode.
+    // Kill-switch for LLM word correction (Settings → Developer, default ON). When OFF the lookup
+    // still logs the would-be correction but applies nothing.
     var wordCorrectionEnabled: Bool {
         UserDefaults.standard.object(forKey: "wordCorrectionEnabled") == nil
             ? true
@@ -114,8 +102,8 @@ final class SessionViewModel {
         isSessionActive = true
         lookupCount = 0
         UIApplication.shared.isIdleTimerDisabled = true
-        // A phone call or Siri tears the audio session out from under the recognizer. Without
-        // this the UI keeps showing "listening" over a dead engine.
+        // A call or Siri tears the audio session away; without this the UI shows "listening"
+        // over a dead engine.
         AudioSessionManager.shared.onInterruption = { [weak self] in
             guard let self, self.isSessionActive else { return }
             self.endSession()
@@ -126,7 +114,6 @@ final class SessionViewModel {
                 phase = .listening
                 let candidates = await speechService.listenForCandidates()
 
-                // Mirror recognizer diagnostics for the debug overlay (we're on @MainActor here).
                 lastCandidates = candidates
                 debugBackendName = speechService.backendName
                 debugLocaleSupported = speechService.localeSupported
@@ -155,21 +142,17 @@ final class SessionViewModel {
         speechService.reset()
         AudioSessionManager.shared.onInterruption = nil
         AudioSessionManager.shared.deactivate()
-        tts.stopSpeaking()
+        synth.stop()
         UIApplication.shared.isIdleTimerDisabled = false
         isSessionActive = false
         showSummary = true
         phase = .idle
     }
 
-    // Cancel the current in-flight lookup: stop TTS, delete the just-saved Word (if any),
-    // remember the rejected transcription so the next ASR pass biases away from it,
-    // and return to listening.
+    // Stop TTS, delete the just-saved Word, blocklist the rejected transcription, return to listening.
     func cancelCurrentLookup() {
-        // Capture the transcription BEFORE mutating state. Prefer the raw ASR transcription
-        // (`currentOriginalTranscription`) so we blocklist what was actually misheard, not the
-        // corrected word that replaced it in `currentWord`. Fall back to `currentWord`/the phase
-        // enum for cancels that predate the transcription being set (and for the test seams).
+        // Prefer the raw transcription so we blocklist what was misheard, not the correction that
+        // replaced it. Fall back to currentWord/the phase for cancels that predate it being set.
         let transcription: String? = currentOriginalTranscription ?? {
             if let w = currentWord { return w.word }
             if case .processing(let p) = phase { return p }
@@ -178,7 +161,7 @@ final class SessionViewModel {
         }()
 
         lookupCancelled = true
-        tts.stopSpeaking()
+        synth.stop()
 
         if let word = currentWord {
             modelContext?.delete(word)
@@ -194,7 +177,6 @@ final class SessionViewModel {
         phase = .listening
     }
 
-    // Compact label for the current phase, shown in the session debug overlay.
     nonisolated static func phaseLabel(_ phase: SessionPhase) -> String {
         switch phase {
         case .idle: return "idle"
@@ -205,8 +187,7 @@ final class SessionViewModel {
         }
     }
 
-    // Pure helper. Filters out candidates that match a recent rejection within the TTL,
-    // capped to the last `cap` rejections (most recent wins). Case-insensitive match.
+    // Drops candidates matching a recent rejection (within the TTL, last `cap`, case-insensitive).
     nonisolated static func filterCandidates(
         _ candidates: [String],
         rejecting recentlyRejected: [(transcription: String, at: Date)],
@@ -221,9 +202,7 @@ final class SessionViewModel {
         return candidates.filter { !rejectedSet.contains($0.lowercased()) }
     }
 
-    // Reader-facing copy for a failed lookup. The reader doesn't own (or see) the API key —
-    // they were handed a capped one — so auth/billing/server failures must never tell them to
-    // "check Settings". Technical detail is preserved in logs (AnthropicService + the catch print).
+    // The reader was handed a capped key they don't see, so failures must never say "check Settings".
     nonisolated static func friendlyLookupMessage(for error: Error) -> String {
         if let urlError = error as? URLError {
             switch urlError.code {
@@ -245,36 +224,31 @@ final class SessionViewModel {
             return
         }
 
-        // Reset cancel flag at the start of each new lookup.
         lookupCancelled = false
         phase = .processing(word)
 
-        guard let apiKey = KeychainService.loadAPIKey(), !apiKey.isEmpty else {
+        guard let apiKey = apiKeyStore.load(), !apiKey.isEmpty else {
             phase = .error("No API key set. Add your Anthropic key in Settings.")
             _ = saveWord(word: word, definition: "", example: "")
             return
         }
 
-        // Track the raw transcription only once we're committed to the network call, so a
-        // failed precondition (no API key) can't leave a stale value for a later cancel.
+        // Set only once we're committed to the call, so the no-API-key bail can't leave a stale value.
         currentOriginalTranscription = word
 
-        // Kick off the definition fetch and echo the word back concurrently. The user just
-        // said this word, so we can pronounce the "correct" native version while Claude is
-        // still generating the definition — the echo hides the network round-trip instead of
-        // stacking on top of it. We pass the rejected mishearings as negative context so a
-        // repeated misfire biases Claude away from the same wrong interpretation.
-        async let pending = anthropicService.lookup(
-            word: word,
-            sourceLanguage: sourceName,
-            targetLanguage: targetName,
-            bookContext: bookContext,
-            recentlyRejected: recentlyRejected.map(\.transcription),
-            apiKey: apiKey
+        // Fetch the definition and echo the word back concurrently: pronouncing the native word
+        // hides the network round-trip. Rejected mishearings go as negative context.
+        async let pending = wordLookup.lookup(
+            word,
+            sourceName,
+            targetName,
+            bookContext,
+            recentlyRejected.map(\.transcription),
+            apiKey
         )
 
         try? AudioSessionManager.shared.activateForPlayback()
-        await tts.speak(word, language: sourceLocale)
+        await synth.speak(word, sourceLocale)
         if lookupCancelled {
             _ = try? await pending  // drain the in-flight request so the async let isn't left dangling
             return
@@ -284,10 +258,7 @@ final class SessionViewModel {
             let result = try await pending
             if lookupCancelled { return }
 
-            // The transcription may have been a mishearing; `result.correctedWord` is the word
-            // Claude believes was intended (nil = no correction). Apply it only when the
-            // kill-switch is on; either way, log the would-be correction so the false-correction
-            // rate is observable on-device before we trust it (the design's safe-rollout).
+            // Apply the correction only when the kill-switch is on; log it either way.
             let appliedCorrection = wordCorrectionEnabled ? result.correctedWord : nil
             let resolvedWord = appliedCorrection ?? word
             if let intended = result.correctedWord {
@@ -303,24 +274,20 @@ final class SessionViewModel {
             lookupCount += 1
             phase = .result(resolvedWord, result.definition, result.formNote)
 
-            // If we corrected the word, the concurrent echo already spoke the *misheard* word.
-            // Voice the authoritative corrected word (in the source locale) before the English
-            // definition so the reader hears the right pronunciation — "<corrected> means <def>".
+            // The concurrent echo already spoke the misheard word; voice the corrected one (in the
+            // source locale) before the definition so the reader hears the right pronunciation.
             if let corrected = appliedCorrection {
-                await tts.speak(corrected, language: sourceLocale)
+                await synth.speak(corrected, sourceLocale)
                 if lookupCancelled { return }
             }
 
-            // Only the definition is spoken. `result.formNote` is deliberately NOT passed to TTS:
-            // it carries source-language text (a lemma or infinitive), and the en-US voice mangles
-            // those — the exact bug that motivated splitting it out of `definition`.
-            await tts.speak(result.definition, language: "en-US")
+            // formNote is never spoken: it carries source-language text the en-US voice mangles.
+            await synth.speak(result.definition, "en-US")
             if lookupCancelled { return }
 
             try? AudioSessionManager.shared.activateForRecording()
 
-            // Successful uncancelled completion: clear in-flight state and the rejection
-            // blocklist (user accepted the lookup, so prior rejections are no longer relevant).
+            // Accepted lookup: clear in-flight state and the rejection blocklist.
             currentWord = nil
             currentOriginalTranscription = nil
             recentlyRejected = []
@@ -331,7 +298,7 @@ final class SessionViewModel {
             currentWord = saveWord(word: word, definition: "", example: "")
             phase = .error(Self.friendlyLookupMessage(for: error))
             try? AudioSessionManager.shared.activateForPlayback()
-            await tts.speak("Couldn't get definition")
+            await synth.speak("Couldn't get definition", "en-US")
             if lookupCancelled { return }
             try? AudioSessionManager.shared.activateForRecording()
             currentWord = nil
@@ -340,10 +307,7 @@ final class SessionViewModel {
     }
 
 #if DEBUG
-    // QA hook: simulate a word being "heard" without the microphone, driving the
-    // full lookup → Haiku → save → TTS path. /ios-qa can drive synthetic touch but
-    // cannot speak, so this is how the core retrieval flow gets exercised on-device.
-    // Triggered by launching with `-qaWord <word>` (see ReadingSessionView).
+    // QA hook: drive the full lookup path without a mic. Launch with `-qaWord <word>` (see ReadingSessionView).
     func debugSimulateHeardWord(_ word: String) async {
         isSessionActive = true            // render the session screen so the result shows
         UIApplication.shared.isIdleTimerDisabled = true
