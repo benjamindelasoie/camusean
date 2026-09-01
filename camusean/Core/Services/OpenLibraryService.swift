@@ -1,11 +1,9 @@
 import Foundation
 import Dependencies
 
-// Book metadata resolved from a scanned/typed ISBN. The fields beyond title/author exist so the
-// `Book` entity can grow into Hardcover/progress/catalog integrations later (stable join keys).
-// `locale` is the app's BCP-47 reading locale ("fr-FR") resolved from Open Library's MARC code via
-// our own ReadingLanguage table — nil when OL gives no/unknown language, in which case the add-book
-// confirm card lets the reader pick. `author` is "" when OL has no by_statement (also editable).
+// Fields beyond title/author are stable join keys for later catalog integrations. `locale` is our
+// BCP-47 reading locale, resolved from OL's MARC code via ReadingLanguage — nil when OL gives
+// no/unknown language (reader picks). `author` is "" when OL has no by_statement.
 struct BookMetadata: Equatable, Sendable {
     var title: String
     var author: String
@@ -18,8 +16,8 @@ struct BookMetadata: Equatable, Sendable {
 
 enum OpenLibraryError: LocalizedError, Equatable {
     case notFound      // 404, or a record with no usable title → caller falls back to manual search
-    case network       // couldn't reach Open Library
-    case decoding      // unexpected response shape
+    case network
+    case decoding
 
     var errorDescription: String? {
         switch self {
@@ -30,13 +28,12 @@ enum OpenLibraryError: LocalizedError, Equatable {
     }
 }
 
-// Open Library JSON Data API client. The `/isbn/{isbn}.json` edition endpoint reliably carries the
-// language (MARC code), cover ids, work key, and a by_statement author string for the languages this
-// app reads (verified against fr/en/es editions). The work record does NOT carry language, so there
-// is deliberately no work-level language hop — a missing edition language goes straight to user-pick.
+// The `/isbn/{isbn}.json` edition endpoint carries language (MARC code), cover ids, work key, and a
+// by_statement author. The work record does NOT carry language, so there is deliberately no
+// work-level language hop — a missing edition language goes straight to user-pick.
 enum OpenLibraryService {
 
-    // Live network fetch. URLSession follows the /isbn -> /books edition redirect automatically.
+    // URLSession follows the /isbn -> /books edition redirect automatically.
     nonisolated static func fetch(isbn: String, session: URLSession = .shared) async throws -> BookMetadata {
         let clean = normalizedISBN(isbn)
         guard !clean.isEmpty, let url = URL(string: "https://openlibrary.org/isbn/\(clean).json") else {
@@ -54,8 +51,8 @@ enum OpenLibraryService {
             throw OpenLibraryError.notFound
         }
         var meta = try parseEdition(from: data, isbn: clean)
-        // Many editions have a null by_statement but list an author key. Resolve the name with one
-        // extra hop so the reader doesn't have to type it.
+        // Many editions have a null by_statement but list an author key — resolve the name with one
+        // extra hop.
         if meta.author.isEmpty,
            let key = (try? JSONDecoder().decode(OLEdition.self, from: data))?.authors?.first?.key {
             meta.author = await fetchAuthorName(key, session: session) ?? ""
@@ -63,8 +60,6 @@ enum OpenLibraryService {
         return meta
     }
 
-    // Resolves "/authors/OL…A" → display name. Best-effort: any failure leaves the author blank
-    // (the reader can type it on the confirm card).
     nonisolated static func fetchAuthorName(_ key: String, session: URLSession = .shared) async -> String? {
         guard let url = URL(string: "https://openlibrary.org\(key).json") else { return nil }
         guard let (data, _) = try? await session.data(from: url),
@@ -74,15 +69,12 @@ enum OpenLibraryService {
         return name
     }
 
-    // Strip everything but digits (and a trailing X, valid in ISBN-10 check digits). Handles
-    // hyphenated typed ISBNs and any stray characters from a barcode scan.
+    // Keep digits and a trailing X (valid in ISBN-10 check digits); strip hyphens and scan noise.
     nonisolated static func normalizedISBN(_ raw: String) -> String {
         String(raw.uppercased().filter { $0.isNumber || $0 == "X" })
     }
 
-    // Pure, testable: decode the edition JSON and map it onto BookMetadata. `nonisolated static`
-    // so the contract (MARC mapping, missing fields, cover building) is unit-testable with canned
-    // JSON and no network.
+    // `nonisolated static` so the mapping is unit-testable with canned JSON and no network.
     nonisolated static func parseEdition(from data: Data, isbn: String) throws -> BookMetadata {
         let edition: OLEdition
         do {
@@ -92,7 +84,7 @@ enum OpenLibraryService {
         }
 
         guard let rawTitle = edition.title?.trimmingCharacters(in: .whitespacesAndNewlines), !rawTitle.isEmpty else {
-            // A record with no title is unusable — treat like a miss so the caller offers manual entry.
+            // No title is unusable — treat like a miss so the caller offers manual entry.
             throw OpenLibraryError.notFound
         }
         let title = cleanedTitle(rawTitle)
@@ -120,14 +112,10 @@ enum OpenLibraryService {
         )
     }
 
-    // Reduce Open Library's full cataloguing title to the main title a reader would actually say.
-    // Editions cram the subtitle and series into one field, e.g.
-    //   "Le Mythe De Sisyphe Essai Sur Labsurde (Collection Folio / Essais)"
-    //   "Le mythe de Sisyphe, essai sur l'absurde"
-    // Strategy: drop trailing parenthetical/bracketed series info, then cut at the first subtitle
-    // separator (":" most reliable, then a dash, then a comma — least reliable but common in French
-    // editions). Aggressive on purpose: the reader wants the short title, and the confirm card is
-    // editable for the rare over-trim.
+    // Reduce OL's cataloguing title (subtitle + series crammed into one field) to the short main
+    // title. Drop trailing parenthetical/bracketed series info, then cut at the first subtitle
+    // separator (":" most reliable, then dash, then comma). Aggressive on purpose — the confirm
+    // card is editable for the rare over-trim.
     nonisolated static func cleanedTitle(_ raw: String) -> String {
         var t = raw
         if let r = t.range(of: #"\s*[\(\[].*$"#, options: .regularExpression) {
@@ -144,9 +132,8 @@ enum OpenLibraryService {
         return cleaned.isEmpty ? raw.trimmingCharacters(in: .whitespacesAndNewlines) : cleaned
     }
 
-    // MARC bibliographic language code -> app reading locale. Region ("fr-FR") comes from our own
-    // ReadingLanguage table, never from Open Library. Accepts both the MARC bibliographic ("fre",
-    // "ger") and ISO 639-2/T ("fra", "deu") spellings. Unknown/unsupported -> nil (user picks).
+    // MARC language code -> app reading locale (region comes from ReadingLanguage, not OL). Accepts
+    // both the MARC bibliographic ("fre", "ger") and ISO 639-2/T ("fra", "deu") spellings.
     nonisolated static func marcToLocale(_ marc: String) -> String? {
         let prefix: String?
         switch marc.lowercased() {
@@ -163,9 +150,8 @@ enum OpenLibraryService {
     }
 }
 
-// Decodable shapes of the OL edition record. `nonisolated` so the synthesized Decodable conformance
-// is usable from the nonisolated parser (the module defaults types to @MainActor). snake_case keys
-// match the API; the `_` triggers no warning since these are file-private wire types.
+// `nonisolated` so the synthesized Decodable conformance is usable from the nonisolated parser
+// (the module defaults types to @MainActor). snake_case keys match the API.
 private nonisolated struct OLEdition: Decodable {
     let title: String?
     let key: String?
@@ -184,10 +170,9 @@ private nonisolated struct OLAuthor: Decodable {
     let name: String?
 }
 
-// swift-dependencies seam. A closure client (not a protocol) because this is a stateless,
-// off-main-actor network call — it sidesteps the @MainActor-default isolation a protocol would
-// impose. testValue/previewValue are inert (throw notFound) so tests and previews never hit the
-// network unless they override `$0.bookMetadata`.
+// A closure client (not a protocol) because this is a stateless, off-main-actor network call — it
+// sidesteps the @MainActor-default isolation a protocol would impose. testValue/previewValue are
+// inert (throw notFound) so tests/previews never hit the network unless they override it.
 struct BookMetadataClient: Sendable {
     var lookup: @Sendable (_ isbn: String) async throws -> BookMetadata
 }

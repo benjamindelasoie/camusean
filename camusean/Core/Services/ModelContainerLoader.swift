@@ -1,14 +1,13 @@
 import Foundation
 import SwiftData
 
-// Loads the app's ModelContainer and exposes a destructive reset path so the
-// UI can recover from a corrupt store instead of crashing on launch.
+// Loads the app's ModelContainer, plus a destructive reset path so the UI can recover from a
+// corrupt store instead of crashing on launch.
 enum ModelContainerLoader {
-    // MUST track the newest schema version, and must be bumped in the SAME commit that adds one.
-    // The `Word`/`Book` typealiases point at the current version, so leaving this on an older
-    // version builds a container whose entities don't match the models the app actually uses:
-    // the new migration stage never runs and SwiftData traps. Bump this, the typealiases, and
-    // CamuseanMigrationPlan.schemas/stages together.
+    // MUST track the newest schema version, bumped in the SAME commit that adds one. The
+    // `Word`/`Book` typealiases point at the current version, so an older value here builds a
+    // container whose entities don't match the app's models — the new stage never runs and
+    // SwiftData traps. Bump this, the typealiases, and CamuseanMigrationPlan together.
     private static let schema = Schema(versionedSchema: CamuseanSchemaV4.self)
 
     static let configuration = ModelConfiguration(
@@ -33,8 +32,7 @@ enum ModelContainerLoader {
         try deleteStoreFiles(at: configuration.url)
     }
 
-    // Exposed for tests so we can exercise the file-deletion logic against a
-    // temp URL instead of the real Application Support container.
+    // Exposed for tests so file deletion can run against a temp URL, not the real container.
     static func deleteStoreFiles(at storeURL: URL) throws {
         let fm = FileManager.default
         let sidecars = [

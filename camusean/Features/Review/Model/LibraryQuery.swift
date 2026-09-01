@@ -1,14 +1,9 @@
 import Foundation
 import SwiftData
 
-// Searching, filtering, sorting, and grouping the Library.
-//
-// These lived as `private var` computed properties inside `LibraryView`, which put them out
-// of reach of the test target and meant SwiftUI re-ran each one on every property access —
-// `filteredWords` was evaluated at least twice per render (once for the empty check, once
-// inside `groupedWords`), plus three separate passes for the stats strip.
-//
-// Pure functions over `[Word]`. Compute once, pass down.
+// Searching, filtering, sorting, and grouping the Library. Pure functions over `[Word]` — these
+// were `private` computed properties inside `LibraryView`, out of the test target's reach and
+// re-run by SwiftUI on every access. Compute once, pass down.
 
 enum LibraryFilter: String, CaseIterable, Identifiable, Sendable {
     case all = "All"
@@ -26,12 +21,10 @@ enum LibrarySortMode: String, CaseIterable, Identifiable, Sendable {
 enum LibraryQuery {
     /// Matches a search term against the headword AND its definition.
     ///
-    /// Definition matching is the point: the common failure is remembering the English and
-    /// not the French, and searching "window" could not find *fenêtre* at all.
-    ///
-    /// `localizedStandardContains` is case- and diacritic-insensitive, so "fenetre" finds
-    /// *fenêtre* — which matters a great deal when the search term has to be typed on a
-    /// keyboard that may not have the accent.
+    /// Definition matching is the point: the common failure is remembering the English, not the
+    /// French — searching "window" could not otherwise find *fenêtre*. `localizedStandardContains`
+    /// is case- and diacritic-insensitive, so "fenetre" finds *fenêtre* (the accent may not be on
+    /// the keyboard).
     static func matches(_ word: Word, search: String) -> Bool {
         let term = search.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !term.isEmpty else { return true }
@@ -69,10 +62,9 @@ enum LibraryQuery {
 
     /// A book's section in the Library, with counts.
     ///
-    /// `totalInBook` and `matureInBook` count **the whole book**, not the filtered subset in
-    /// `words`. A header reading "12 words · 5 at 21+ days" while four rows are visible under
-    /// an active search would otherwise be indistinguishable from a bug. The header describes
-    /// the book; the rows describe the filter.
+    /// `totalInBook`/`matureInBook` count the whole book, not the filtered subset in `words`: the
+    /// header describes the book, the rows describe the filter. Otherwise a "12 words" header over
+    /// four rows under an active search would look like a bug.
     struct BookGroup: Identifiable, Sendable {
         let id: String
         let title: String
@@ -81,9 +73,8 @@ enum LibraryQuery {
         let matureInBook: Int
     }
 
-    /// Groups the (already filtered) words under their book, newest book first, free reading
-    /// last. `allWords` is needed unfiltered so the per-book totals describe the book rather
-    /// than the current search.
+    /// Groups the (already filtered) words under their book, newest book first, free reading last.
+    /// `allWords` is needed unfiltered so the per-book totals describe the book, not the search.
     static func group(
         filtered: [Word],
         allWords: [Word],

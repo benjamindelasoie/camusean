@@ -1,11 +1,8 @@
 import SwiftUI
 
-// Explains how to download Apple's Enhanced/Premium voices. There is no public API to
-// deep-link to Settings → Accessibility → Spoken Content → Voices (the `prefs:` scheme is
-// private and gets apps rejected), so this is instructional. Shared by the first-run
-// auto-prompt in ReadingSessionView and the re-openable "Voice" row in Settings.
+// How to download Apple's Enhanced/Premium voices. There's no public API to deep-link into
+// Settings (the `prefs:` scheme is private and gets apps rejected), so this is instructional.
 struct VoiceSetupSheet: View {
-    // Languages whose audio quality matters (reading language + English), shown with status.
     let languages: [ReadingLanguage]
     var onDone: () -> Void
 
@@ -20,7 +17,6 @@ struct VoiceSetupSheet: View {
                 .foregroundStyle(.secondary)
                 .lineSpacing(4)
 
-            // Per-language status so the user sees exactly which voice still needs downloading.
             VStack(spacing: 8) {
                 ForEach(languages) { lang in
                     HStack(spacing: 10) {

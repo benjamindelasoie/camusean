@@ -1,18 +1,6 @@
 import SwiftUI
 
 // The "nothing here yet" shape, used by every empty and caught-up state in the app.
-//
-// This existed four times before it existed once: `ReviewView.emptyState`,
-// `ReviewView.allCaughtUp`, `LibraryView.emptyState`, and `LibraryView.noMatchesState`.
-// Two of them were byte-identical, and the 2026-07-28 design pass had to apply the same
-// font and colour edit in both files to keep them in step.
-//
-//   ╭───────────────╮
-//   │   ( glyph )   │  tinted circle, decorative — hidden from VoiceOver
-//   │     Title     │  serif, title2
-//   │    Message    │  callout, secondary, centred
-//   │   [ action ]  │  optional
-//   ╰───────────────╯
 struct EmptyStateView<Action: View>: View {
     let systemImage: String
     let title: String

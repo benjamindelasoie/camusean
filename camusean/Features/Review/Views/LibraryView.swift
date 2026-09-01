@@ -12,9 +12,8 @@ struct LibraryView: View {
 
     // MARK: - Body
 
-    // Everything derived is computed ONCE here and handed down. Reading a computed property
-    // re-runs it every time, and the previous shape read `filteredWords` (filter + sort) at
-    // least twice per render plus three separate passes for the stats.
+    // Everything derived is computed ONCE here and handed down: a computed property re-runs on
+    // every read, and the old shape read filter+sort twice per render plus three stat passes.
     //
     // TODO: switch to dynamic @Query if any user's library exceeds ~5k words. See TODOS.md.
     var body: some View {
@@ -70,10 +69,8 @@ struct LibraryView: View {
 
     // MARK: - List
 
-    // Once the reader has any book, the Library organizes words under their book (newest book
-    // first, "Free reading" last) — "the words I learned reading L'Étranger". Before any book
-    // exists, it stays a flat list. Search/filter/sort still apply inside each group; the
-    // section header counts describe the whole book (see LibraryQuery.BookGroup).
+    // With any book present, words group under their book (newest first, "Free reading" last);
+    // before that it stays a flat list. Filter/sort apply inside each group.
     private func contentList(filtered: [Word], groups: [LibraryQuery.BookGroup]) -> some View {
         List {
             if groups.isEmpty {
@@ -91,14 +88,9 @@ struct LibraryView: View {
         .listStyle(.plain)
     }
 
-    /// Section headers pin to the top of a plain `List` while their rows scroll underneath,
-    /// so a header MUST be opaque. The system-provided `Section("title")` header carries a
-    /// background of its own; this custom one replaced it and did not, which let word rows
-    /// slide visibly through the book title.
-    ///
-    /// Full-bleed background with the insets zeroed and the padding reapplied by hand, so
-    /// the fill spans the whole row while the text still lines up with the 20pt leading edge
-    /// the rows use.
+    /// A plain `List` pins headers while rows scroll under them, so a custom header MUST be
+    /// opaque or word rows slide visibly through the title. Insets are zeroed and padding
+    /// reapplied by hand so the fill is full-bleed while text keeps the rows' 20pt leading edge.
     private func bookSectionHeader(_ group: LibraryQuery.BookGroup) -> some View {
         HStack(alignment: .firstTextBaseline) {
             Text(group.title)
@@ -124,9 +116,8 @@ struct LibraryView: View {
 
     @ViewBuilder
     private func rowView(for word: Word) -> some View {
-        // A Button, not .onTapGesture: the row carries an accessibility hint promising
-        // "double tap for full definition", and only a real button gives VoiceOver the
-        // trait to honour it.
+        // A Button, not .onTapGesture: only a real button gives VoiceOver the trait for the
+        // row's "double tap for full definition" hint.
         Button { selectedWord = word } label: {
             libraryRow(for: word)
         }
@@ -193,13 +184,11 @@ struct LibraryView: View {
 
     // MARK: - Stats header
 
-    // Three non-overlapping facts. The previous set (total / due this week / learned this
-    // week) routinely rendered "29 / 29 / 0" — two identical numbers and a zero — because
-    // "total" and "due this week" describe almost the same thing on a young library.
+    // Three non-overlapping facts: the old total / due-this-week / learned-this-week set
+    // rendered "29 / 29 / 0" because total and due-this-week nearly coincide on a young library.
     //
-    // "AT 21+ DAYS" is deliberately not labelled "mastered": one lapse resets the interval
-    // to a single day, and with no review history the app cannot claim a word was ever
-    // previously mature. The label states what is actually true.
+    // "AT 21+ DAYS" is deliberately not "mastered": one lapse resets the interval to a day, and
+    // with no review history the app can't claim a word was ever mature.
     private func statsHeader(_ stats: LibraryStats) -> some View {
         HStack(spacing: 0) {
             statCell(value: stats.dueNow, label: "DUE NOW")
@@ -217,8 +206,7 @@ struct LibraryView: View {
             Text("\(value)")
                 .font(.system(.title2, design: .serif).weight(.medium))
                 .foregroundStyle(.primary)
-            // Was a fixed 9pt, below any reasonable floor and unaffected by the reader's
-            // text-size setting.
+            // Was a fixed 9pt — below any floor and ignoring the reader's text-size setting.
             Text(label)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -242,7 +230,7 @@ struct LibraryView: View {
                         .font(.footnote.weight(.medium))
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        // Was ~30pt tall. 44pt is the HIG floor for anything tappable.
+                        // 44pt is the HIG floor for anything tappable (was ~30pt).
                         .frame(minHeight: 44)
                         .background(filter == f ? Color.camusean : Color(.systemGray6))
                         .foregroundStyle(filter == f ? .white : .primary)

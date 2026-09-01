@@ -6,16 +6,12 @@ import Foundation
 //   0..2 = lapse (forgot or barely recalled) — interval resets to 1 day, EF decreases
 //   3..5 = success — interval grows; EF adjusts up or down by quality
 //
-// Camusean swipe mapping (set in ReviewView):
-//   right swipe = "Learned" → quality 4
-//   left  swipe = "Repeat"  → quality 2 (lapse)
-//
 // Reference: Wozniak, Algorithm SM-2, https://supermemo.guru/wiki/SuperMemo_Algorithm_SM-2
 struct SRSScheduler {
     static let minimumEaseFactor: Double = 1.3
     static let initialEaseFactor: Double = 2.5
 
-    // Updates the word in place with the new SM-2 schedule.
+    // Mutates the word in place with its new SM-2 schedule.
     static func schedule(word: Word, quality: Int, now: Date = Date()) {
         let clampedQuality = max(0, min(5, quality))
 
@@ -23,14 +19,12 @@ struct SRSScheduler {
         let newInterval: Int
 
         if clampedQuality < 3 {
-            // Lapse: reset interval, push EF down (clamped at floor).
             newInterval = 1
             newEaseFactor = max(
                 minimumEaseFactor,
                 word.easeFactor + easeFactorDelta(quality: clampedQuality)
             )
         } else {
-            // Success: progress interval, adjust EF.
             switch word.interval {
             case 0:
                 newInterval = 1

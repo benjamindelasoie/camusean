@@ -1,16 +1,11 @@
 import SwiftUI
 
-// In-app privacy policy (App Review guideline 5.1.2 wants the policy reachable inside the
-// app, not only from the App Store listing).
+// In-app privacy policy — App Review guideline 5.1.2 wants it reachable inside the app, not only
+// from the App Store listing. Rendered natively (no hosted URL yet, and it works with no network).
 //
-// Rendered natively rather than as a Link to the hosted copy, for two reasons: the app has
-// no hosted URL yet, and a native screen still works with no network — which matters for an
-// app whose whole premise is reading somewhere quiet.
-//
-// ⚠️ THIS IS A SECOND COPY. The canonical, publicly-served version is
-// `appstore/web/privacy.html`, which is what the App Store Connect Privacy Policy URL points
-// at. Any change to one MUST be mirrored in the other, including the effective date — a
-// mismatch between the in-app and hosted policy is itself a 5.1.2 problem.
+// ⚠️ SECOND COPY. The canonical, publicly-served version is `appstore/web/privacy.html` (the App
+// Store Connect Privacy Policy URL). Any change here MUST be mirrored there, effective date
+// included — a mismatch is itself a 5.1.2 problem.
 struct PrivacyPolicyView: View {
     var body: some View {
         ScrollView {

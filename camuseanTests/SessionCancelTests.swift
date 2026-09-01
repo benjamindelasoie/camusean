@@ -6,8 +6,6 @@ import SwiftData
 @MainActor
 @Suite struct SessionCancelTests {
 
-    // Build an in-memory container so we can exercise modelContext.delete without driving
-    // a real ModelContainer file. Each test gets its own container.
     private func makeContext() -> ModelContext {
         // Must match the version the `Word` typealias points at — inserting a current-version
         // model into an older-version container traps inside SwiftData.
@@ -17,8 +15,6 @@ import SwiftData
         return ModelContext(container)
     }
 
-    // 1. Cancel after saveWord: the currentWord is deleted, recentlyRejected gets its
-    //    transcription, phase resets to .listening, lookupCancelled flag is set.
     @Test func cancelDeletesCurrentWordAndRecordsRejection() {
         let vm = SessionViewModel()
         let context = makeContext()
@@ -46,13 +42,10 @@ import SwiftData
             Issue.record("phase should be .listening after cancel, got \(vm.phase)")
         }
 
-        // Verify the Word is actually gone from the context.
         let remaining = try? context.fetch(FetchDescriptor<Word>())
         #expect(remaining?.isEmpty == true)
     }
 
-    // 2. Cancel during .processing (before saveWord): no currentWord exists yet, but the
-    //    transcription comes from the phase enum's associated value.
     @Test func cancelDuringProcessingCapturesFromPhase() {
         let vm = SessionViewModel()
         vm.modelContext = makeContext()
@@ -72,7 +65,6 @@ import SwiftData
         }
     }
 
-    // 3. A second cancel when there's nothing in flight is a no-op (no crash, idempotent).
     @Test func doubleCancelIsIdempotent() {
         let vm = SessionViewModel()
         vm.modelContext = makeContext()
@@ -81,14 +73,11 @@ import SwiftData
         vm.cancelCurrentLookup()
         let firstCount = vm.recentlyRejected.count
 
-        // Phase is now .listening, currentWord is nil. Second cancel should not crash
-        // and should not add another rejection (no transcription to capture).
+        // Second cancel has no transcription to capture, so it must not add a rejection.
         vm.cancelCurrentLookup()
         #expect(vm.recentlyRejected.count == firstCount)
     }
 
-    // 4. Cancel when phase is .listening and there's nothing in flight: should be safe.
-    //    Doesn't add to recentlyRejected (no transcription available).
     @Test func cancelDuringListeningIsHarmless() {
         let vm = SessionViewModel()
         vm.modelContext = makeContext()
@@ -104,8 +93,7 @@ import SwiftData
         }
     }
 
-    // 5. The rejection timestamp is approximately "now" so the entry is treated as in-window
-    //    by subsequent filterCandidates calls.
+    // The timestamp must be "now" so the entry stays in-window for later filterCandidates calls.
     @Test func cancelRecordsCurrentTimestamp() throws {
         let vm = SessionViewModel()
         vm.modelContext = makeContext()

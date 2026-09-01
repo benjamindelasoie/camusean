@@ -3,26 +3,22 @@ import Testing
 import SwiftData
 @testable import camusean
 
-// Tests for the V1 -> V2 migration MAPPING. SwiftData's in-process migration roundtrip
-// (open V1, write, reopen V2 + plan) fails in test harnesses with
-// `loadIssueModelContainer` because the V1 container is held alive by SwiftData's
-// process-level store registry even after going out of scope. So we test the mapping
-// logic directly via CamuseanMigrationPlan.applyV1toV2Mapping, which is the same
-// closure body the production migration stage runs. This covers OUR logic; the
-// SwiftData schema-version detection itself is Apple's responsibility.
+// Tests the V1 -> V2 migration mapping directly via CamuseanMigrationPlan.applyV1toV2Mapping
+// (the same closure the production stage runs) because the full SwiftData roundtrip fails in test
+// harnesses with `loadIssueModelContainer`: the V1 container is held alive by SwiftData's
+// process-level store registry even after going out of scope.
 @MainActor
 @Suite struct MigrationTests {
 
-    // Build an in-memory V2 container. New rows here simulate the post-lightweight-rename
-    // state of rows previously persisted under V1 — same fields, new SRS columns at defaults.
+    // Rows inserted here stand in for V1 rows post-lightweight-rename: same fields, new SRS
+    // columns at their defaults.
     private func makeV2Container() throws -> ModelContainer {
         let schema = Schema(versionedSchema: CamuseanSchemaV2.self)
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)
         return try ModelContainer(for: schema, configurations: [config])
     }
 
-    // 1. CRITICAL: a row where isKnown=true must land on a future schedule
-    //    (interval=365, EF=2.5, nextReviewDate≈now+365d) so it does NOT resurface in Review.
+    // An isKnown=true row must land on a future schedule so it does NOT resurface in Review.
     @Test func isKnownTrueRowMigratesToFutureSchedule() throws {
         let container = try makeV2Container()
         let context = ModelContext(container)
@@ -35,9 +31,6 @@ import SwiftData
             targetLanguage: "English"
         )
         row.isKnown = true
-        // Defaults from Word.init: interval=0, easeFactor=2.5, nextReviewDate=nil.
-        // This represents the state of an isKnown=true row right after a lightweight
-        // schema rename adds the new SRS fields with their defaults.
         context.insert(row)
         try context.save()
 
@@ -55,8 +48,8 @@ import SwiftData
         #expect(migrated.nextReviewDate == expected)
     }
 
-    // 2. CRITICAL: a row where isKnown=false must keep nextReviewDate=nil so it still
-    //    appears in Review (matching v1.0 behavior — it was due, still due).
+    // An isKnown=false row must keep nextReviewDate=nil so it still appears in Review (it was
+    // due under v1.0, still due).
     @Test func isKnownFalseRowMigratesAsDue() throws {
         let container = try makeV2Container()
         let context = ModelContext(container)
@@ -82,8 +75,6 @@ import SwiftData
         #expect(migrated.nextReviewDate == nil)
     }
 
-    // 3. CRITICAL: all non-SRS fields (word, definition, exampleSentence, languages, timestamp)
-    //    must be preserved verbatim across the mapping.
     @Test func nonSRSFieldsPreservedVerbatim() throws {
         let container = try makeV2Container()
         let context = ModelContext(container)

@@ -1,14 +1,11 @@
 import Foundation
 import SwiftData
 
-// Each version's `models` array qualifies its entries with `Self.` on purpose. A bare `Word.self`
-// inside these enums does resolve to the nested type (an inner declaration shadows the file-scope
-// typealias), but the two names are only one scoping rule apart, and a version that silently
-// listed the CURRENT `Word` would break its own migration. The explicit form is the documented
-// convention for exactly this ambiguity.
+// `models` entries are qualified with `Self.` deliberately: a bare `Word.self` resolves to the
+// file-scope typealias (the current schema), which would make a frozen version migrate against the
+// wrong shape.
 
-// V2: the v1.1 schema (adds SM-2 SRS fields to V1). Kept as a frozen snapshot for the
-// migration plan; V3 below is the current schema (see the typealiases at the bottom).
+// V2 (v1.1): adds SM-2 SRS fields to V1. Frozen snapshot for the migration plan.
 enum CamuseanSchemaV2: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(2, 0, 0) }
     static var models: [any PersistentModel.Type] { [Self.Word.self] }
@@ -21,10 +18,10 @@ enum CamuseanSchemaV2: VersionedSchema {
         var sourceLanguage: String
         var targetLanguage: String
         var timestamp: Date
-        // isKnown is deprecated in v1.1 (use SRS fields below) but kept on disk for backwards compat.
+        // Deprecated (use SRS fields) but kept on disk for back-compat.
         var isKnown: Bool
 
-        // SM-2 scheduling state. nextReviewDate == nil means "due now" (new word or post-lapse).
+        // SM-2 state. nextReviewDate == nil means "due now".
         var interval: Int = 0
         var easeFactor: Double = 2.5
         var nextReviewDate: Date? = nil
@@ -50,13 +47,9 @@ enum CamuseanSchemaV2: VersionedSchema {
     }
 }
 
-// V3: the v1.4 schema. Adds the `Book` entity (the app's organizing spine) and two optional
-// fields on `Word` — `book` (the book a word was learned in) and `originalTranscription` (the
-// raw ASR text when the LLM corrected a misheard word). All additions are additive and
-// optional/defaulted, so V2 -> V3 is a lightweight migration (see CamuseanMigrationPlan).
-//
-// FROZEN. V3 shipped to a real device with real saved rows, so editing it in place would change
-// a schema version that already exists on disk. V4 below is the current schema.
+// V3 (v1.4): adds the `Book` entity plus optional `Word.book` and `Word.originalTranscription`.
+// Additive/optional, so V2 -> V3 is lightweight. FROZEN — shipped to a device with real rows, so
+// editing it in place would mutate a schema version already on disk.
 enum CamuseanSchemaV3: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(3, 0, 0) }
     static var models: [any PersistentModel.Type] { [Self.Word.self, Self.Book.self] }
@@ -69,21 +62,20 @@ enum CamuseanSchemaV3: VersionedSchema {
         var sourceLanguage: String
         var targetLanguage: String
         var timestamp: Date
-        // isKnown is deprecated (use SRS fields) but kept on disk for backwards compat.
+        // Deprecated (use SRS fields) but kept on disk for back-compat.
         var isKnown: Bool
 
-        // SM-2 scheduling state. nextReviewDate == nil means "due now".
+        // SM-2 state. nextReviewDate == nil means "due now".
         var interval: Int = 0
         var easeFactor: Double = 2.5
         var nextReviewDate: Date? = nil
 
-        // v1.4: the book this word was learned in. nil for free sessions and for every row that
-        // existed before V3. The to-one side; the inverse + delete rule live on `Book.words`.
+        // nil for free sessions and every pre-V3 row. The to-one side; the inverse + nullify rule
+        // live on `Book.words`.
         var book: Book? = nil
 
-        // v1.4: the raw speech transcription when the LLM corrected a likely mishearing (nil when
-        // no correction happened). Lets the false-correction rate survive restarts and be queryable
-        // instead of living only in console logs.
+        // Raw ASR text when the LLM corrected a mishearing (nil otherwise). Persisted so the
+        // false-correction rate survives restarts and stays queryable.
         var originalTranscription: String? = nil
 
         init(
@@ -118,20 +110,18 @@ enum CamuseanSchemaV3: VersionedSchema {
         // picks one — Open Library's language coverage on foreign editions is uneven.
         var language: String
 
-        // Stable identity / future join keys (Hardcover, progress, catalog sync). All optional —
-        // a manually-added book may have none of them.
+        // Stable identity / future join keys. All optional — a manual add may have none.
         var isbn: String?
         var openLibraryEditionID: String?
         var openLibraryWorkID: String?
         var coverURL: String?
 
         var dateAdded: Date
-        // Reserved for v1.5 progress tracking; nil until the reader marks the book finished.
+        // Reserved for v1.5 progress; nil until the book is marked finished.
         var dateFinished: Date?
 
-        // Deleting a book NULLIFIES its words' back-reference — it must never cascade-delete a
-        // reader's saved vocabulary. This is the only side that declares the relationship; the
-        // `Word.book` to-one side is inferred from the `inverse:` keypath.
+        // Nullify, never cascade — deleting a book must not delete a reader's saved words. Only
+        // side that declares the relationship; `Word.book` is inferred from the inverse keypath.
         @Relationship(deleteRule: .nullify, inverse: \Word.book)
         var words: [Word] = []
 
@@ -159,15 +149,10 @@ enum CamuseanSchemaV3: VersionedSchema {
     }
 }
 
-// V4: adds `Word.formNote` — the morphology/lemma teaching line ("Past participle of
-// *disparaître*", "Feminine of *fatigué*"), shown on screen but never spoken. It exists as its
-// own field rather than folded into `definition` because the definition is now English-only and
-// spoken aloud: a French lemma inside it would be mangled by the en-US voice (the observed
-// "chansons" -> "plural of chanson" bug). nil for a plain word that teaches nothing extra.
-//
-// Additive and optional, so V3 -> V4 is a lightweight migration. `Book` is carried over
-// unchanged — a versioned schema must declare every model it contains, so it is re-declared
-// here rather than reused from V3.
+// V4 (v1.5): adds optional `Word.formNote` — the morphology/lemma line shown on screen but never
+// spoken. Its own field rather than folded into `definition` because the definition is English-only
+// and spoken aloud, where a French lemma gets mangled by the en-US voice. Additive/optional, so
+// V3 -> V4 is lightweight. `Book` is re-declared unchanged (a versioned schema must list every model).
 enum CamuseanSchemaV4: VersionedSchema {
     static var versionIdentifier: Schema.Version { Schema.Version(4, 0, 0) }
     static var models: [any PersistentModel.Type] { [Self.Word.self, Self.Book.self] }
@@ -180,22 +165,21 @@ enum CamuseanSchemaV4: VersionedSchema {
         var sourceLanguage: String
         var targetLanguage: String
         var timestamp: Date
-        // isKnown is deprecated (use SRS fields) but kept on disk for backwards compat.
+        // Deprecated (use SRS fields) but kept on disk for back-compat.
         var isKnown: Bool
 
-        // SM-2 scheduling state. nextReviewDate == nil means "due now".
+        // SM-2 state. nextReviewDate == nil means "due now".
         var interval: Int = 0
         var easeFactor: Double = 2.5
         var nextReviewDate: Date? = nil
 
-        // v1.4: the book this word was learned in. nil for free sessions.
+        // nil for free sessions.
         var book: Book? = nil
 
-        // v1.4: the raw speech transcription when the LLM corrected a likely mishearing.
+        // Raw ASR text when the LLM corrected a mishearing.
         var originalTranscription: String? = nil
 
-        // v1.5: morphology/lemma teaching, displayed but NEVER passed to TTS. nil when the word
-        // is its own dictionary form and there is nothing to teach.
+        // Morphology/lemma teaching, displayed but never passed to TTS. nil when nothing to teach.
         var formNote: String? = nil
 
         init(
@@ -232,20 +216,18 @@ enum CamuseanSchemaV4: VersionedSchema {
         // picks one — Open Library's language coverage on foreign editions is uneven.
         var language: String
 
-        // Stable identity / future join keys (Hardcover, progress, catalog sync). All optional —
-        // a manually-added book may have none of them.
+        // Stable identity / future join keys. All optional — a manual add may have none.
         var isbn: String?
         var openLibraryEditionID: String?
         var openLibraryWorkID: String?
         var coverURL: String?
 
         var dateAdded: Date
-        // Reserved for v1.5 progress tracking; nil until the reader marks the book finished.
+        // Reserved for v1.5 progress; nil until the book is marked finished.
         var dateFinished: Date?
 
-        // Deleting a book NULLIFIES its words' back-reference — it must never cascade-delete a
-        // reader's saved vocabulary. This is the only side that declares the relationship; the
-        // `Word.book` to-one side is inferred from the `inverse:` keypath.
+        // Nullify, never cascade — deleting a book must not delete a reader's saved words. Only
+        // side that declares the relationship; `Word.book` is inferred from the inverse keypath.
         @Relationship(deleteRule: .nullify, inverse: \Word.book)
         var words: [Word] = []
 
@@ -273,6 +255,6 @@ enum CamuseanSchemaV4: VersionedSchema {
     }
 }
 
-// Canonical app types — always the current schema version.
+// Canonical app types — the current schema version.
 typealias Word = CamuseanSchemaV4.Word
 typealias Book = CamuseanSchemaV4.Book

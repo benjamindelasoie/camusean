@@ -83,8 +83,8 @@ struct WordProgressTests {
         let now = Date(timeIntervalSince1970: 1_700_000_000)
         let stats = LibraryStats.compute(
             for: [
-                word("new1"),                                                        // new, due
-                word("new2"),                                                        // new, due
+                word("new1"),
+                word("new2"),
                 word("learning", interval: 5, nextReview: now.addingTimeInterval(86_400)),
                 word("mature", interval: 40, nextReview: now.addingTimeInterval(86_400)),
                 word("overdue", interval: 30, nextReview: now.addingTimeInterval(-86_400)),

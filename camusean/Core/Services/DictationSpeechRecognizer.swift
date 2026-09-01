@@ -3,25 +3,15 @@ import AVFoundation
 import Observation
 import os
 
-// iOS 26+ speech backend built on Apple's on-device SpeechAnalyzer pipeline.
-//
-// Uses `DictationTranscriber` — the short-utterance module that reuses the system
-// dictation models (no large per-locale model download, unlike `SpeechTranscriber`),
-// which is exactly the right fit for single-word lookups. It runs fully on-device,
-// is more private than the legacy server-capable path, and Apple reports it ~2× faster
-// than Whisper Large-v3-Turbo.
-//
-// The contract mirrors `LegacySpeechRecognizer` so `SessionViewModel` stays backend-
-// agnostic: set a locale, listen for one utterance, get up to 3 candidate strings,
-// with a live `partialTranscription` while the user speaks. Endpointing matches the
-// legacy path — finalize after `silenceTimeout` of no new volatile results.
+// iOS 26+ on-device speech backend (SpeechAnalyzer). Uses `DictationTranscriber`, which reuses
+// the system dictation models — no large per-locale download, unlike `SpeechTranscriber`. The
+// contract mirrors `LegacySpeechRecognizer` so `SessionViewModel` stays backend-agnostic.
 @available(iOS 26, *)
 @Observable
 @MainActor
 final class DictationSpeechRecognizer: SpeechRecognizing {
     var partialTranscription: String = ""
 
-    // Diagnostics surfaced by the session debug overlay.
     let backendName = "Dictation · SpeechAnalyzer (iOS 26)"
     private(set) var localeSupported: Bool?
     private(set) var lastErrorMessage: String?
@@ -42,28 +32,24 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
     // Match the legacy path's aggressive endpointing — these are single foreign words.
     private let silenceTimeout: Duration = .seconds(0.6)
 
-    // Constructing the recognizer touches no main-actor state, so the factory (and the
-    // swift-dependencies live value) can build it from a nonisolated context.
+    // No main-actor state at init, so the factory / live value can build it nonisolated.
     nonisolated init() {}
 
     func setLocale(_ identifier: String) {
         localeIdentifier = identifier
     }
 
-    // Permission model is unchanged from the legacy path: microphone + Speech
-    // authorization. (SpeechAnalyzer is fully on-device, but we keep requesting the
-    // same Speech authorization the app already asks for so behavior is identical
-    // across backends and the Settings copy stays accurate.)
+    // Still requests Speech authorization (despite being on-device) so behavior and the Settings
+    // copy match the legacy backend.
     func requestPermissions() async -> Bool {
-        // Delegated to a nonisolated helper so the TCC background-queue callbacks don't trip
-        // the Swift 6 main-actor executor assertion (see SpeechRecognition.requestMicAndSpeechAuthorization).
+        // Nonisolated helper so the TCC background-queue callbacks don't trip the Swift 6
+        // main-actor executor assertion (see SpeechRecognition.requestMicAndSpeechAuthorization).
         await SpeechRecognition.requestMicAndSpeechAuthorization()
     }
 
-    // Listens until one complete utterance is detected. Returns up to 3 distinct
-    // candidate transcriptions (the final result's text plus its alternatives), or an
-    // empty array on no-speech / model-unavailable / cancellation. Self-contained:
-    // builds the analyzer, streams the mic, finalizes, tears down.
+    // Listens for one utterance, returning up to 3 distinct candidates (final text + alternatives)
+    // or [] on no-speech / model-unavailable / cancellation. Builds the analyzer, streams the mic,
+    // finalizes, tears down.
     func listenForCandidates() async -> [String] {
         teardown()
         candidates = []
@@ -89,10 +75,8 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
         do {
             try await ensureModel(for: transcriber, locale: locale)
         } catch {
-            // The default source language (French) is a system dictation language, so this
-            // is the rare-locale edge. Returning [] keeps the session alive; the loop simply
-            // waits for the next utterance. (A per-locale fallback to the legacy recognizer
-            // would close this gap — see the note in the research write-up.)
+            // Rare-locale edge (French, the default, is a system dictation language). Returning []
+            // keeps the session alive; the loop waits for the next utterance.
             print("[Dictation] model/locale unavailable for \(localeIdentifier): \(error)")
             lastErrorMessage = "model/locale unavailable for \(localeIdentifier): \(error.localizedDescription)"
             teardown()
@@ -113,9 +97,7 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
         return await withCheckedContinuation { (cont: CheckedContinuation<[String], Never>) in
             self.continuation = cont
 
-            // Reader: pull transcription results until the stream completes (after finalize).
-            // Volatile results drive the live partial display + the silence timer; the final
-            // result yields our candidate list.
+            // Volatile results drive the live partial + silence timer; the final result is the candidates.
             resultsTask = Task { [weak self] in
                 guard let self else { return }
                 do {
@@ -135,16 +117,11 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
                 }
             }
 
-            // Drive the analyzer over the mic input stream.
             Task { [weak self] in
                 do { try await analyzer.start(inputSequence: inputStream) }
                 catch { self?.finish(with: []) }
             }
 
-            // Mic tap: convert each buffer to the analyzer's format and feed the input stream.
-            // Installed via a nonisolated helper so the realtime audio-thread callback carries
-            // no @MainActor isolation — otherwise Swift 6 traps it with a main-executor assertion
-            // (EXC_BREAKPOINT) the instant the first buffer arrives off-main. See installMicTap.
             let input = engine.inputNode
             let tapFormat = input.outputFormat(forBus: 0)
             installMicTap(
@@ -160,13 +137,10 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
         }
     }
 
-    // Installs the AVAudioEngine mic tap. `nonisolated` is load-bearing: AVFoundation invokes
-    // the tap block on its realtime background queue, and a @MainActor-isolated block (which is
-    // what the compiler infers inside this @MainActor class) would assert it's on the main
-    // executor before running — tripping `dispatch_assert_queue` → EXC_BREAKPOINT the moment the
-    // first buffer arrives. Defining the block in this nonisolated method strips that isolation.
-    // The block only touches its passed-in locals (a nonisolated BufferConverter + the Sendable
-    // continuation), never main-actor state.
+    // `nonisolated` is load-bearing: AVFoundation runs the tap block on its realtime queue, and a
+    // @MainActor-isolated block (the default inside this class) would assert it's on the main
+    // executor → EXC_BREAKPOINT on the first buffer. This method's block touches only its passed-in
+    // locals (a nonisolated BufferConverter + the Sendable continuation), never main-actor state.
     nonisolated private func installMicTap(
         on input: AVAudioInputNode,
         tapFormat: AVAudioFormat,
@@ -200,8 +174,6 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
     }
 
     // Endpoint reached: stop feeding audio and ask the analyzer to flush a final result.
-    // The results stream then delivers the final transcription and completes, which
-    // resolves listenForCandidates() via the reader task.
     private func finalizeInput() async {
         inputContinuation?.finish()
         inputContinuation = nil
@@ -230,8 +202,7 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
 
     private func ensureModel(for transcriber: DictationTranscriber, locale: Locale) async throws {
         guard await isSupported(locale) else { throw RecognizerError.localeNotSupported }
-        // Install the on-device assets if the system doesn't already have them. For
-        // dictation languages this is usually a no-op (the assets ship with the keyboard).
+        // Usually a no-op for dictation languages — the assets ship with the keyboard.
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             try await request.downloadAndInstall()
         }
@@ -244,8 +215,7 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
     private func isSupported(_ locale: Locale) async -> Bool {
         let supported = await DictationTranscriber.supportedLocales
         let ok = supported.contains { $0.identifier(.bcp47) == locale.identifier(.bcp47) }
-        // Cache the real signal (locale present in the supported set) so the debug overlay
-        // can read it synchronously — kept distinct from a later asset-download failure.
+        // Cache so the debug overlay reads it synchronously — distinct from a later download failure.
         localeSupported = ok
         return ok
     }
@@ -253,12 +223,9 @@ final class DictationSpeechRecognizer: SpeechRecognizing {
     enum RecognizerError: Error { case localeNotSupported }
 }
 
-// Converts mic buffers into the sample rate/format the analyzer expects.
-// Ported from FluidInference/swift-scribe (the reference iOS 26 SpeechAnalyzer app).
-//
-// `nonisolated` (opting out of the module's MainActor default): this runs on AVFoundation's
-// realtime audio thread from the mic-tap block, never on the main actor. Leaving it
-// MainActor-isolated is what made the tap callback trip a Swift 6 executor assertion.
+// Converts mic buffers to the analyzer's format. Ported from FluidInference/swift-scribe.
+// `nonisolated`: runs on AVFoundation's realtime audio thread from the tap block, never the main
+// actor — leaving it MainActor-isolated is what tripped the Swift 6 executor assertion.
 @available(iOS 26, *)
 nonisolated private final class BufferConverter {
     enum Error: Swift.Error {
@@ -290,10 +257,9 @@ nonisolated private final class BufferConverter {
         var nsError: NSError?
         let bufferProcessedLock = OSAllocatedUnfairLock(initialState: false)
 
-        // AVAudioConverter's input block is @Sendable, but the API requires returning the
-        // (non-Sendable) source buffer from it. The block is invoked synchronously on this
-        // same thread before convert() returns, so handing the buffer across is safe —
-        // nonisolated(unsafe) states that explicitly and silences the framework-gap warning.
+        // The @Sendable input block must return the non-Sendable source buffer. It runs
+        // synchronously on this thread before convert() returns, so the hand-off is safe;
+        // nonisolated(unsafe) states that and silences the framework-gap warning.
         nonisolated(unsafe) let inputBuffer = buffer
         let status = converter.convert(to: conversionBuffer, error: &nsError) { _, inputStatusPointer in
             let wasProcessed = bufferProcessedLock.withLock { bufferProcessed -> Bool in

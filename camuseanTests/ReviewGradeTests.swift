@@ -2,12 +2,9 @@ import Testing
 import Foundation
 @testable import camusean
 
-// The seam that 8 green SRSSchedulerTests could not cover.
-//
-// `SRSSchedulerTests.perfectRecallRaisesEaseFactor` has always proved the scheduler handles
-// quality 5 correctly. Nothing proved the APP ever sends a 5 — the mapping was two integer
-// literals inside a view. These tests assert the mapping itself, so the defect (no grade
-// could ever raise an ease factor) cannot come back.
+// SRSSchedulerTests proves the scheduler handles quality 5, but nothing proved the APP ever sends
+// a 5 — the grade->quality mapping was two integer literals inside a view. These tests assert the
+// mapping, so the defect (no grade could ever raise an ease factor) cannot come back.
 @Suite("Review grading")
 struct ReviewGradeTests {
 
@@ -85,6 +82,6 @@ struct ReviewGradeTests {
         SRSScheduler.schedule(word: easyWord, quality: ReviewGrade.easy.quality)
         SRSScheduler.schedule(word: goodWord, quality: ReviewGrade.good.quality)
         #expect(easyWord.interval == goodWord.interval)
-        #expect(easyWord.easeFactor > goodWord.easeFactor)   // the difference is banked
+        #expect(easyWord.easeFactor > goodWord.easeFactor)
     }
 }

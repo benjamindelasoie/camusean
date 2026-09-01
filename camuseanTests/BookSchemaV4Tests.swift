@@ -18,8 +18,6 @@ import SwiftData
         return ModelContext(container)
     }
 
-    // The V4 container opens at all (the schema + relationship are well-formed) and a Book with
-    // its future-ready identity fields round-trips.
     @Test func v4ContainerOpensAndBookRoundTrips() throws {
         let context = try makeV4Context()
         let book = Book(
@@ -47,7 +45,6 @@ import SwiftData
         #expect(b.words.isEmpty)
     }
 
-    // A Word can be book-tied or free (nil book), and the inverse relationship populates both ways.
     @Test func wordBookRelationshipRoundTripsBothWays() throws {
         let context = try makeV4Context()
         let book = Book(title: "Madame Bovary", author: "Gustave Flaubert", language: "fr-FR")
@@ -59,15 +56,12 @@ import SwiftData
         context.insert(free)
         try context.save()
 
-        // to-one side
         #expect(tied.book?.title == "Madame Bovary")
         #expect(free.book == nil)
-        // to-many inverse populated automatically
         #expect(book.words.count == 1)
         #expect(book.words.first?.word == "désinvolture")
     }
 
-    // CRITICAL: deleting a Book must NULLIFY its words (preserve the vocabulary), never cascade.
     @Test func deletingBookNullifiesWordsRatherThanCascading() throws {
         let context = try makeV4Context()
         let book = Book(title: "Le Petit Prince", author: "Antoine de Saint-Exupéry", language: "fr-FR")
@@ -81,18 +75,14 @@ import SwiftData
         context.delete(book)
         try context.save()
 
-        // Both words survive — the reader's vocabulary is intact.
         let words = try context.fetch(FetchDescriptor<Word>())
         #expect(words.count == 2)
-        // The formerly-tied word's back-reference is nullified, not dangling.
         let apprivoiser = try #require(words.first { $0.word == "apprivoiser" })
         #expect(apprivoiser.book == nil)
-        // The book is gone.
         let books = try context.fetch(FetchDescriptor<Book>())
         #expect(books.isEmpty)
     }
 
-    // originalTranscription persists for corrected words and is nil otherwise.
     @Test func originalTranscriptionPersists() throws {
         let context = try makeV4Context()
         let corrected = Word(
@@ -113,9 +103,8 @@ import SwiftData
         #expect(bonjour.originalTranscription == nil)
     }
 
-    // v1.5: formNote persists for an inflected form and stays nil for a plain dictionary word.
-    // nil is the same state every pre-V4 row migrates to, so this also covers what an existing
-    // reader's library looks like immediately after the V3 -> V4 lightweight stage runs.
+    // nil is the state every pre-V4 row migrates to, so this also covers an existing reader's
+    // library immediately after the V3 -> V4 lightweight stage runs.
     @Test func formNotePersistsAndDefaultsToNil() throws {
         let context = try makeV4Context()
         let inflected = Word(

@@ -2,28 +2,21 @@ import Speech
 import AVFoundation
 import Observation
 
-// SFSpeechRecognizer-based backend (iOS 18–25, and the fallback whenever the iOS 26
-// DictationTranscriber path isn't available). Unchanged behavior — this is the speech
-// engine the app has always shipped; it now just satisfies the SpeechRecognizing seam.
+// SFSpeechRecognizer backend (iOS 18–25, and the fallback whenever the iOS 26
+// DictationTranscriber path isn't available).
 @Observable
 @MainActor
 final class LegacySpeechRecognizer: SpeechRecognizing {
-    // Live transcription shown while user is speaking
     var partialTranscription: String = ""
 
-    // Diagnostics surfaced by the session debug overlay. SFSpeechRecognizer supports all
-    // system locales, so `localeSupported` is always true on this backend.
-    // `backendName` reports the recognition mode too — this backend only runs on iOS 18–25,
-    // which no current test device has, so the overlay is the only way to see which mode a
-    // real user got.
+    // SFSpeechRecognizer supports all system locales, so `localeSupported` is always true here.
     var backendName: String {
         "Legacy · SFSpeechRecognizer (\(usedOnDeviceRecognition ? "on-device" : "server"))"
     }
     let localeSupported: Bool? = true
     private(set) var lastErrorMessage: String?
 
-    /// Whether the last `listenForCandidates()` ran fully on-device. Mirrors what was actually
-    /// requested, not merely what was asked for — see `listenForCandidates`.
+    /// Whether the last `listenForCandidates()` actually ran on-device — see `listenForCandidates`.
     private(set) var usedOnDeviceRecognition = false
 
     private var recognizer: SFSpeechRecognizer?
@@ -33,8 +26,7 @@ final class LegacySpeechRecognizer: SpeechRecognizing {
     private var continuation: CheckedContinuation<[String], Never>?
     private var silenceTimer: Task<Void, Never>?
 
-    // Constructing the recognizer touches no main-actor state, so the factory (and the
-    // swift-dependencies live value) can build it from a nonisolated context.
+    // Constructing the recognizer touches no main-actor state, so a nonisolated context can build it.
     nonisolated init() {}
 
     func setLocale(_ identifier: String) {
@@ -42,15 +34,13 @@ final class LegacySpeechRecognizer: SpeechRecognizing {
     }
 
     func requestPermissions() async -> Bool {
-        // Delegated to a nonisolated helper so the TCC background-queue callbacks don't trip
-        // the Swift 6 main-actor executor assertion (see SpeechRecognition.requestMicAndSpeechAuthorization).
+        // Nonisolated helper so the TCC background-queue callbacks don't trip the Swift 6 main-actor
+        // executor assertion (see SpeechRecognition.requestMicAndSpeechAuthorization).
         await SpeechRecognition.requestMicAndSpeechAuthorization()
     }
 
-    // Listens until one complete utterance is detected (Apple fires isFinal after ~1s silence).
-    // Returns up to 3 distinct candidate transcriptions from Apple's ASR, or an empty array
-    // on timeout / no speech / cancellation. Each call is self-contained: starts the engine,
-    // waits, stops the engine.
+    // Apple fires isFinal after ~1s silence. Each call is self-contained: starts the engine, waits,
+    // stops the engine.
     func listenForCandidates() async -> [String] {
         teardown()
         lastErrorMessage = nil
@@ -69,16 +59,11 @@ final class LegacySpeechRecognizer: SpeechRecognizing {
         let req = SFSpeechAudioBufferRecognitionRequest()
         req.shouldReportPartialResults = true
 
-        // Keep audio on the device whenever the locale's assets allow it. Left unset, this
-        // property defaults to false and SFSpeechRecognizer may stream the microphone audio to
-        // Apple's servers — a network hop on every lookup (see the latency TODO) and a data flow
-        // the privacy policy would otherwise have to disclose.
-        //
-        // Gated on `supportsOnDeviceRecognition` rather than forced to `true`: forcing it makes
-        // recognition fail outright for a locale whose on-device assets aren't installed. This
-        // form can only ever improve on the previous behavior. Note the flag is per-locale and
-        // flips to true once iOS finishes downloading a language's assets, so the same user can
-        // legitimately see both modes over time.
+        // Left unset this defaults to false, and SFSpeechRecognizer may stream mic audio to Apple's
+        // servers. Gated on `supportsOnDeviceRecognition` rather than forced to `true`: forcing it
+        // makes recognition fail outright for a locale whose on-device assets aren't installed. The
+        // flag is per-locale and flips to true once iOS downloads a language's assets, so the same
+        // user can legitimately see both modes over time.
         req.requiresOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
         usedOnDeviceRecognition = recognizer.supportsOnDeviceRecognition
 
@@ -132,9 +117,8 @@ final class LegacySpeechRecognizer: SpeechRecognizing {
         partialTranscription = ""
     }
 
-    // How long the user must stay silent after speaking before we finalize the utterance.
-    // These are single foreign words, so we can endpoint aggressively — every 100ms here is
-    // 100ms shaved off every lookup. Tunable; confirm the feel on-device before lowering further.
+    // Single foreign words, so we can endpoint aggressively — every 100ms here is 100ms off every
+    // lookup. Confirm the feel on-device before lowering further.
     private let silenceTimeout: Duration = .seconds(0.6)
 
     private func restartSilenceTimer() {

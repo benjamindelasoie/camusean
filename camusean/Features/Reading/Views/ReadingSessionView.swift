@@ -8,11 +8,9 @@ struct ReadingSessionView: View {
     @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.openURL) private var openURL
 
-    // All words; used only to compute the weekly "learned" count for the progress strip.
     @Query private var allWords: [Word]
 
-    // Books, newest first — the start-screen selector defaults to the most recent (the book of
-    // the previous session). nil selectedBook = a free session.
+    // nil selectedBook = a free session; the selector defaults to the most recent book.
     @Query(sort: \Book.dateAdded, order: .reverse) private var books: [Book]
     @State private var selectedBook: Book?
     @State private var didDefaultBook = false
@@ -20,28 +18,24 @@ struct ReadingSessionView: View {
 
     @State private var showVoiceOnboarding = false
 
-    // Runtime-toggled (Settings → Developer) live recognition diagnostics panel.
-    // Not #if DEBUG on purpose — it must be available to diagnose Release/TestFlight builds.
+    // Not #if DEBUG on purpose — must stay available to diagnose Release/TestFlight builds.
     @AppStorage("showSessionDebugOverlay") private var showSessionDebugOverlay = false
 
     #if DEBUG
-    // One-shot guard so the QA injection fires once per launch, not on every
-    // tab re-appearance (onAppear re-fires when returning to the Read tab).
+    // Fires the QA injection once per launch, not on every onAppear (tab re-entry re-fires it).
     @State private var qaInjectionFired = false
     #endif
 
     private static let voicePromptShownKey = "voicePromptShown"
 
-    // Display type. These were fixed point sizes that ignored the reader's text-size
-    // setting entirely — at accessibility sizes the app title ended up smaller than the
-    // body copy beneath it. @ScaledMetric keeps the design size at the default setting
-    // and scales from there.
+    // @ScaledMetric, not fixed sizes: fixed point sizes ignore the reader's text-size setting,
+    // which left the app title smaller than the body copy at accessibility sizes.
     @ScaledMetric(relativeTo: .largeTitle) private var heroTitleSize: CGFloat = 38
     @ScaledMetric(relativeTo: .largeTitle) private var resultWordSize: CGFloat = 40
     @ScaledMetric(relativeTo: .title) private var transcriptionSize: CGFloat = 30
 
-    // A single `.sheet(item:)` presenter. Two `.sheet(isPresented:)` modifiers on
-    // one view is a SwiftUI conflict that eats taps in the presented sheet.
+    // A single `.sheet(item:)` presenter: two `.sheet(isPresented:)` on one view is a SwiftUI
+    // conflict that eats taps in the presented sheet.
     private enum ActiveSheet: Identifiable {
         case summary
         case voiceOnboarding
@@ -49,9 +43,8 @@ struct ReadingSessionView: View {
         var id: Self { self }
     }
 
-    // Derived from the two independent triggers (VM-owned session summary,
-    // view-owned voice prompt). Summary wins if both are somehow set; clearing
-    // resets both so interactive dismissal can't strand a flag.
+    // Summary wins if both triggers are set; clearing resets both so interactive dismissal
+    // can't strand a flag.
     private var activeSheet: Binding<ActiveSheet?> {
         Binding(
             get: {
@@ -102,15 +95,14 @@ struct ReadingSessionView: View {
                 }
             case .addBook:
                 AddBookView { book in
-                    selectedBook = book   // newly added book becomes the active reading book
+                    selectedBook = book
                     showAddBook = false
                 }
             }
         }
         .onAppear {
             vm.modelContext = modelContext
-            // Default the session to the most recent book once (don't override a free choice the
-            // reader makes, and don't re-default on every tab return).
+            // Default to the most recent book only once, so a free choice survives tab returns.
             if !didDefaultBook {
                 selectedBook = books.first
                 didDefaultBook = true
@@ -120,9 +112,8 @@ struct ReadingSessionView: View {
             maybeRunQAInjection()
             #endif
         }
-        // If the selected book disappears from the store (e.g. deleted from a future Library
-        // manager), drop the stale reference so we never start a session or tag a word against a
-        // deleted book, and the selector can't show a phantom title.
+        // Drop a selected book that vanished from the store, so no session or saved word tags a
+        // deleted book and the selector can't show a phantom title.
         .onChange(of: books.map(\.persistentModelID)) { _, ids in
             if let selected = selectedBook, !ids.contains(selected.persistentModelID) {
                 selectedBook = nil
@@ -130,8 +121,6 @@ struct ReadingSessionView: View {
         }
     }
 
-    // Tap on the mic during .processing or .result cancels the current lookup.
-    // Other phases are no-ops (no in-flight work to cancel).
     private func handleMicTap() {
         switch vm.phase {
         case .processing, .result:
@@ -142,11 +131,10 @@ struct ReadingSessionView: View {
     }
 
     #if DEBUG
-    // QA mic-bypass: when launched with `-qaWord <word>`, inject that word straight
-    // into the retrieval flow (Haiku → save → TTS) without the microphone. The
-    // value lives in NSUserDefaults' volatile argument domain — set per launch via
+    // QA mic-bypass: `-qaWord <word>` at launch injects that word into the retrieval flow
+    // (Haiku → save → TTS) with no microphone. Lives in NSUserDefaults' volatile argument
+    // domain (never persisted), set per launch via:
     //   xcrun devicectl device process launch ... com.bdelasoie.camusean -qaWord bonjour
-    // and never persisted. DEBUG-only; compiled out of Release/TestFlight.
     private func maybeRunQAInjection() {
         guard !qaInjectionFired,
               let word = UserDefaults.standard.string(forKey: "qaWord"),
@@ -158,8 +146,6 @@ struct ReadingSessionView: View {
 
     // MARK: - Voice onboarding
 
-    // Auto-prompt once if the app would sound robotic for any language it speaks.
-    // Re-accessible afterward from Settings → Voice.
     // TODO: migrate this one-time prompt to TipKit when adding a second tip. See TODOS.md.
     private func evaluateVoiceOnboarding() {
         let defaults = UserDefaults.standard
@@ -168,16 +154,15 @@ struct ReadingSessionView: View {
         if VoiceSetup.isAnyVoiceMissing() {
             showVoiceOnboarding = true
         } else {
-            // Enhanced voices already installed for everything we speak; never auto-prompt again.
+            // Nothing to download; never auto-prompt again.
             defaults.set(true, forKey: Self.voicePromptShownKey)
         }
     }
 
-    // True until the reader's first word is saved — gates the one-time gesture hint.
-    // Keys off the existing word store, so it needs no separate onboarding flag.
+    // Gates the one-time gesture hint off the word store — no separate onboarding flag needed.
     private var isFirstTime: Bool { allWords.isEmpty }
 
-    // Words "graduated" this week (interval >= 6 days, scheduled, created this week).
+    // "Learned" = scheduled with interval >= 6 days, created this week.
     private var learnedThisWeekCount: Int {
         let now = Date()
         let startOfWeek = Calendar.current.dateInterval(of: .weekOfYear, for: now)?.start ?? now
@@ -191,9 +176,8 @@ struct ReadingSessionView: View {
     // MARK: - Start Screen
 
     private var startScreen: some View {
-        // Scrolls only when it has to. At accessibility text sizes the pitch and the CTA
-        // no longer fit a single screen, and a fixed VStack simply ran them off the bottom
-        // and under the tab bar. `.basedOnSize` keeps the normal case feeling static.
+        // Scrolls only when it must: at accessibility text sizes the pitch + CTA overflow a
+        // fixed VStack. `.basedOnSize` keeps the normal case static.
         GeometryReader { proxy in
             ScrollView {
                 VStack(spacing: 0) {
@@ -201,10 +185,8 @@ struct ReadingSessionView: View {
                     heroMark
                     Spacer().frame(height: 32)
                     heroText
-                    // Capped, so surplus height goes above the hero instead of opening a
-                    // dead band between the pitch and the controls. Two unbounded Spacers
-                    // split the slack evenly, which left roughly a fifth of a 6.9" screen
-                    // empty in the middle.
+                    // Capped so surplus height rises above the hero instead of opening a dead
+                    // band mid-screen (unbounded Spacers split the slack and left a visible gap).
                     Spacer().frame(minHeight: 32, maxHeight: 96)
                     bookSelector
                     Spacer().frame(height: 16)
@@ -218,9 +200,7 @@ struct ReadingSessionView: View {
         }
     }
 
-    // Choose what this session reads: free, one of your books (defaults to the most recent), or
-    // add a new one by scanning its barcode. Books stay out of a 4th tab — they live here, where a
-    // session begins.
+    // Books live here, where a session begins, rather than in a 4th tab.
     private var bookSelector: some View {
         Menu {
             Button { selectedBook = nil } label: {
@@ -257,8 +237,8 @@ struct ReadingSessionView: View {
     }
 
     private var heroMark: some View {
-        // Purely decorative, so at accessibility text sizes it yields room to the words
-        // and the button rather than pushing them off the fold.
+        // Decorative, so it shrinks at accessibility sizes to yield room rather than push the
+        // words and button off the fold.
         let scale: CGFloat = typeSize.isAccessibilitySize ? 0.6 : 1
         return ZStack {
             Circle()
@@ -280,9 +260,8 @@ struct ReadingSessionView: View {
                 .font(.system(size: heroTitleSize, weight: .bold, design: .serif))
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-            // Two lines by design, but never truncated: at accessibility text sizes the
-            // second line ("Hear its meaning. Keep reading.") used to disappear entirely,
-            // taking half the pitch with it.
+            // Never truncated: at accessibility sizes the second line used to vanish, taking
+            // half the pitch with it.
             Text("Say a word you don't know.\nHear its meaning. Keep reading.")
                 .font(.callout)
                 .foregroundStyle(.secondary)
@@ -308,8 +287,7 @@ struct ReadingSessionView: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "waveform")
-                    // The label used to truncate to "Begin Re…" at accessibility text
-                    // sizes. It is the primary call to action; it wraps instead.
+                    // Primary CTA: wraps rather than truncating to "Begin Re…" at large sizes.
                     Text("Begin Reading")
                         .fontWeight(.semibold)
                         .lineLimit(2)
@@ -365,8 +343,7 @@ struct ReadingSessionView: View {
 
             Spacer()
 
-            // The only way out of a session. It rendered at tertiaryLabel (1.73:1 on white)
-            // in a ~20pt-tall hit area — the least legible, hardest-to-hit control in the app.
+            // The only way out of a session — must stay legible and meet the 44pt hit target.
             Button("End session") { vm.endSession() }
                 .font(.subheadline.weight(.medium))
                 .foregroundStyle(.secondary)
@@ -381,9 +358,8 @@ struct ReadingSessionView: View {
 
     // MARK: - Debug Overlay
 
-    // Live recognition diagnostics, shown only when the Settings → Developer toggle is on.
-    // Reads mirrored state off the view model (see SessionViewModel.debug* props); the
-    // `candidates: —` line is the silent-degrade tell when the recognizer hears nothing.
+    // Recognition diagnostics (gated by the Settings → Developer toggle). The `candidates: —`
+    // line is the silent-degrade tell when the recognizer hears nothing.
     private var debugOverlay: some View {
         let supported: String = {
             switch vm.debugLocaleSupported {
@@ -468,7 +444,6 @@ struct ReadingSessionView: View {
             case .listening:
                 if vm.partialTranscription.isEmpty {
                     if isFirstTime {
-                        // One-time teach of the core gesture, until the first word is saved.
                         VStack(spacing: 10) {
                             Text("Say a word out loud")
                                 .font(.callout.weight(.medium))
@@ -524,8 +499,7 @@ struct ReadingSessionView: View {
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
                             .lineSpacing(5)
-                        // The grammar lesson: where the form the reader met comes from. Read, never
-                        // heard — the spoken definition stays English-only on purpose.
+                        // Read, never heard — the spoken definition stays English-only on purpose.
                         if let formNote {
                             Text(formNote)
                                 .font(.footnote)
@@ -620,7 +594,6 @@ private struct OrganicMicView: View {
 
     private var dial: some View {
         ZStack {
-            // Breathing rings
             ForEach(0..<3, id: \.self) { i in
                 Circle()
                     .stroke(Color.camusean.opacity(0.13 - Double(i) * 0.03), lineWidth: 1)
@@ -641,7 +614,6 @@ private struct OrganicMicView: View {
                     )
             }
 
-            // Processing arc
             if isProcessing {
                 Circle()
                     .trim(from: 0, to: 0.65)
@@ -653,7 +625,7 @@ private struct OrganicMicView: View {
                     .rotationEffect(.degrees(reduceMotion ? 0 : spinAngle))
             }
 
-            // Core — grey base + amber overlay for smooth animated transition
+            // Grey base + amber overlay: crossfades on listening.
             ZStack {
                 Circle()
                     .fill(Color(.systemGray5))
@@ -679,10 +651,8 @@ private struct OrganicMicView: View {
                 .opacity(isListening || isProcessing ? 1.0 : 0.45)
                 .animation(.easeInOut(duration: 0.3), value: isListening)
         }
-        // Was a bare .onTapGesture, which left the app's central control as static text to
-        // VoiceOver: the label was announced but no button trait came with it, so it was
-        // not reliably activatable. The wrapping Button (above) supplies the trait, the
-        // activation, and Full Keyboard Access.
+        // A wrapping Button, not .onTapGesture: only the Button gives VoiceOver the button
+        // trait, activation, and Full Keyboard Access for this central control.
         .contentShape(Circle())
         .onAppear {
             guard !reduceMotion else { return }

@@ -2,14 +2,12 @@ import SwiftUI
 import VisionKit
 import Vision
 
-// Live ISBN barcode scanner wrapping VisionKit's DataScannerViewController. Reports the first
-// recognized barcode payload once, then stops. `isAvailable` gates whether the scan UI should be
-// offered at all — it is false in the Simulator and on devices without the Neural Engine, so the
-// add-book flow must always keep manual entry reachable.
+// Wraps VisionKit's DataScannerViewController: reports the first recognized barcode once, then
+// stops. `isAvailable` is false in the Simulator and on devices without the Neural Engine, so
+// the add-book flow must always keep manual entry reachable.
 //
-// DataScannerViewControllerDelegate callbacks arrive on the main thread, so the Coordinator is a
-// plain @MainActor object that updates state directly — no nonisolated bridging is needed here
-// (unlike the realtime-audio speech callbacks elsewhere in the app).
+// Delegate callbacks arrive on the main thread, so the Coordinator is a plain @MainActor object
+// with no nonisolated bridging (unlike the realtime-audio speech callbacks elsewhere).
 struct BarcodeScannerView: UIViewControllerRepresentable {
     let onScan: (String) -> Void
 

@@ -1,18 +1,10 @@
 import Dependencies
 import Observation
 
-// Registers the speech-recognition seam with swift-dependencies so call sites resolve it
-// via `@Dependency(\.speechRecognizer)` instead of constructing a backend directly. This
-// is the consistent DI seam the rest of the app's services (Anthropic, TTS, Keychain) can
-// adopt over time; today it makes the speech engine trivially swappable in tests/previews.
-//
-// `liveValue` is the OS-appropriate backend (DictationTranscriber on iOS 26+, else
-// SFSpeechRecognizer). `testValue`/`previewValue` are inert so tests and previews never
-// touch the microphone unless they explicitly opt in by overriding the dependency.
-//
-// The getters are `nonisolated` to satisfy swift-dependencies' nonisolated requirements
-// (this module otherwise defaults to MainActor isolation); the backends construct without
-// main-actor state, so that's safe.
+// swift-dependencies seam for speech-to-text: call sites resolve `@Dependency(\.speechRecognizer)`
+// instead of constructing a backend. `liveValue` is the OS-appropriate recognizer; test/preview are
+// inert so nothing touches the mic unless overridden. Getters are `nonisolated` to meet
+// swift-dependencies' requirements (the module otherwise defaults to MainActor).
 private enum SpeechRecognizerKey: DependencyKey {
     nonisolated static var liveValue: any SpeechRecognizing { SpeechRecognition.make() }
     nonisolated static var testValue: any SpeechRecognizing { NoopSpeechRecognizer() }
@@ -26,10 +18,8 @@ extension DependencyValues {
     }
 }
 
-// Inert backend used in tests and SwiftUI previews — no microphone, no recognition.
-// Tests that need recognized words override the dependency with their own double:
+// Inert backend for tests and previews — no mic. Override to supply candidates:
 //   withDependencies { $0.speechRecognizer = StubRecognizer(candidates: ["bonjour"]) }
-//     operation: { /* drive the view model */ }
 @Observable
 @MainActor
 final class NoopSpeechRecognizer: SpeechRecognizing {

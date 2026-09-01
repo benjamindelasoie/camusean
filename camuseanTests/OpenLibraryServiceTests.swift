@@ -12,7 +12,6 @@ import Testing
     // MARK: parseEdition — real shapes
 
     @Test func parsesFrenchEdition() throws {
-        // L'Étranger (9782070360024): MARC fre, cover, work + edition keys, null by_statement.
         let json = #"""
         {"title":"L’étranger","key":"/books/OL37027182M","by_statement":null,
          "languages":[{"key":"/languages/fre"}],"works":[{"key":"/works/OL1230613W"}],

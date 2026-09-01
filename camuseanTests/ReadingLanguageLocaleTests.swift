@@ -2,15 +2,10 @@ import Testing
 import Foundation
 @testable import camusean
 
-// Regression guard for a defect caught by the Codex outside voice during the 2026-07-28
-// eng review.
-//
-// `Word.sourceLanguage` persists a DISPLAY NAME ("French"), not a locale, because
-// `SessionViewModel.saveWord` writes `sourceName` — which reads `sourceLanguageName` from
-// UserDefaults. Handing that value to `TTSService.speak(language:)` matched no voice
-// (`bestVoice` compares the first two characters, and "Fr" never matches "fr-FR"), the
-// fallback `AVSpeechSynthesisVoice(language:)` returned nil, and the synthesizer used the
-// device default — a French word read aloud in an English voice.
+// Regression guard: `Word.sourceLanguage` persists a DISPLAY NAME ("French"), not a locale.
+// Handing that to `TTSService.speak(language:)` matched no voice (`bestVoice` compares the first
+// two characters, and "Fr" never matches "fr-FR"), so a French word got read aloud in an English
+// voice.
 @Suite("Reading language locale resolution")
 struct ReadingLanguageLocaleTests {
 
